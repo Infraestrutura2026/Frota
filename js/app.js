@@ -1,9 +1,11 @@
 // ==========================================
 // FROTA PRO v3.0 - Lógica Completa
+// Modo Local + Backend Google Sheets
 // ==========================================
 
 const App = (function() {
   let token = localStorage.getItem('frota_token');
+  let isLocalMode = true;
   let vehicles = [];
   let fueling = [];
   let maintenance = [];
@@ -12,7 +14,9 @@ const App = (function() {
   let editingVehicle = null;
   let editingDriver = null;
 
-  // Dados dos 29 veículos do Complexo Penal de Marília
+  // ========================
+  // DADOS DOS 29 VEÍCULOS
+  // ========================
   const IMPORT_DATA = [
     { placa: 'RJJ7A31', grupo: 'S2', marca: 'Hyundai', modelo: 'HB20S', ano: 2022, cor: 'Prata', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'FLEX', capacidade: 5 },
     { placa: 'EMK3G05', grupo: 'S2', marca: 'Hyundai', modelo: 'HB20S', ano: 2022, cor: 'Prata', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'FLEX', capacidade: 5 },
@@ -45,27 +49,220 @@ const App = (function() {
     { placa: 'FAE4E56', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 }
   ];
 
-  // API helper
+  // ========================
+  // LOCAL STORAGE HELPERS
+  // ========================
+  function lsGet(key) {
+    try { return JSON.parse(localStorage.getItem('frota_' + key)) || []; } catch (e) { return []; }
+  }
+  function lsSet(key, val) { localStorage.setItem('frota_' + key, JSON.stringify(val)); }
+
+  // ========================
+  // API (com fallback local)
+  // ========================
   async function api(action, data) {
+    // Se não configurado, força modo local
+    if (!CONFIG.isConfigured) {
+      isLocalMode = true;
+      return handleLocal(action, data);
+    }
     try {
       const url = CONFIG.API_URL + '?action=' + action;
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, ...data })
+        body: JSON.stringify({ action, ...data }),
+        signal: ctrl.signal
       });
-      return await response.json();
+      clearTimeout(t);
+      const result = await response.json();
+      isLocalMode = false;
+      updateModeBadge();
+      return result;
     } catch (e) {
-      console.error('API Error:', e);
-      return { success: false, error: 'Erro de conexão com o servidor' };
+      isLocalMode = true;
+      updateModeBadge();
+      return handleLocal(action, data);
     }
   }
 
-  function showAlert(msg, type = 'danger', target = 'page') {
+  function handleLocal(action, data) {
+    switch (action) {
+      case 'login':
+        if (data.user === CONFIG.LOCAL_USER && data.pass === CONFIG.LOCAL_PASS) {
+          return { success: true, token: 'local-token', name: 'Administrador' };
+        }
+        return { success: false, error: 'Usuário ou senha incorretos' };
+
+      case 'getVehicles':
+        return { success: true, data: lsGet('vehicles') };
+      case 'saveVehicle': {
+        let list = lsGet('vehicles');
+        if (data.id) {
+          list = list.map(v => v.ID === data.id ? { ...v, ...normalizeVehicle(data), ID: data.id } : v);
+        } else {
+          const novo = { ...normalizeVehicle(data), ID: 'V' + Date.now() };
+          list.push(novo);
+        }
+        lsSet('vehicles', list);
+        return { success: true, message: 'Veículo salvo (modo local)' };
+      }
+      case 'deleteVehicle': {
+        let list = lsGet('vehicles').filter(v => v.ID !== data.id);
+        lsSet('vehicles', list);
+        return { success: true };
+      }
+
+      case 'getFueling':
+        return { success: true, data: lsGet('fueling') };
+      case 'saveFueling': {
+        let list = lsGet('fueling');
+        list.push({ ...data, ID: 'F' + Date.now() });
+        lsSet('fueling', list);
+        return { success: true, message: 'Abastecimento salvo (modo local)' };
+      }
+      case 'deleteFueling': {
+        let list = lsGet('fueling').filter(f => f.ID !== data.id);
+        lsSet('fueling', list);
+        return { success: true };
+      }
+
+      case 'getMaintenance':
+        return { success: true, data: lsGet('maintenance') };
+      case 'saveMaintenance': {
+        let list = lsGet('maintenance');
+        list.push({ ...data, ID: 'M' + Date.now() });
+        lsSet('maintenance', list);
+        return { success: true, message: 'Manutenção salva (modo local)' };
+      }
+      case 'deleteMaintenance': {
+        let list = lsGet('maintenance').filter(m => m.ID !== data.id);
+        lsSet('maintenance', list);
+        return { success: true };
+      }
+
+      case 'getKm':
+        return { success: true, data: lsGet('km') };
+      case 'saveKm': {
+        let list = lsGet('km');
+        list.push({ ...data, ID: 'K' + Date.now() });
+        lsSet('km', list);
+        return { success: true, message: 'Quilometragem salva (modo local)' };
+      }
+      case 'deleteKm': {
+        let list = lsGet('km').filter(k => k.ID !== data.id);
+        lsSet('km', list);
+        return { success: true };
+      }
+
+      case 'getDrivers':
+        return { success: true, data: lsGet('drivers') };
+      case 'saveDriver': {
+        let list = lsGet('drivers');
+        if (data.id) {
+          list = list.map(d => d.ID === data.id ? { ...d, ...normalizeDriver(data), ID: data.id } : d);
+        } else {
+          list.push({ ...normalizeDriver(data), ID: 'D' + Date.now() });
+        }
+        lsSet('drivers', list);
+        return { success: true, message: 'Motorista salvo (modo local)' };
+      }
+      case 'deleteDriver': {
+        let list = lsGet('drivers').filter(d => d.ID !== data.id);
+        lsSet('drivers', list);
+        return { success: true };
+      }
+
+      case 'importVehicles': {
+        let list = lsGet('vehicles');
+        let count = 0;
+        (data.vehicles || []).forEach(v => {
+          if (!list.find(ex => ex.Placa === v.placa)) {
+            list.push({ ...normalizeVehicle(v), ID: 'V' + Date.now() + count });
+            count++;
+          }
+        });
+        lsSet('vehicles', list);
+        return { success: true, message: 'Importação concluída (modo local)', count };
+      }
+
+      case 'getDashboard': {
+        const veh = lsGet('vehicles');
+        const fuel = lsGet('fueling');
+        const maint = lsGet('maintenance');
+        const drv = lsGet('drivers');
+        const now = new Date();
+        const thisMonth = now.getMonth();
+        const thisYear = now.getFullYear();
+        const fuelMonth = fuel.filter(f => {
+          const d = new Date(f.Data || f.data);
+          return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+        });
+        const totalFuel = fuelMonth.reduce((s, f) => s + (parseFloat(f.Valor || f.valor) || 0), 0);
+        const kmMonth = fuel.filter(f => {
+          const d = new Date(f.Data || f.data);
+          return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+        });
+        const totalKm = kmMonth.reduce((s, f) => s + (parseFloat(f.KM || f.km) || 0), 0);
+        return {
+          success: true,
+          data: {
+            totalVehicles: veh.length,
+            activeVehicles: veh.filter(v => v.Status === 'ATIVO').length,
+            maintenanceVehicles: veh.filter(v => v.Status === 'MANUTENÇÃO').length,
+            fuelMonth: totalFuel,
+            kmMonth: totalKm,
+            totalDrivers: drv.length,
+            recentFuel: fuel.slice(-5).reverse(),
+            recentMaintenance: maint.slice(-5).reverse()
+          }
+        };
+      }
+
+      default:
+        return { success: false, error: 'Ação não suportada em modo local: ' + action };
+    }
+  }
+
+  function normalizeVehicle(data) {
+    return {
+      Placa: data.placa || data.Placa || '',
+      Grupo: data.grupo || data.Grupo || '',
+      Marca: data.marca || data.Marca || '',
+      Modelo: data.modelo || data.Modelo || '',
+      Ano: data.ano || data.Ano || '',
+      Cor: data.cor || data.Cor || '',
+      Chassi: data.chassi || data.Chassi || '',
+      Renavam: data.renavam || data.Renavam || '',
+      Hodometro: data.hodometro || data.Hodometro || 0,
+      Capacidade: data.capacidade || data.Capacidade || '',
+      Combustivel: data.combustivel || data.Combustivel || 'FLEX',
+      Status: data.status || data.Status || 'ATIVO'
+    };
+  }
+
+  function normalizeDriver(data) {
+    return {
+      Nome: data.nome || data.Nome || '',
+      CPF: data.cpf || data.CPF || '',
+      CNH: data.cnh || data.CNH || '',
+      Categoria: data.categoria || data.Categoria || 'B',
+      Telefone: data.telefone || data.Telefone || '',
+      Status: data.status || data.Status || 'ATIVO'
+    };
+  }
+
+  // ========================
+  // UTILS
+  // ========================
+  function showAlert(msg, type, target) {
+    target = target || 'page';
     const el = document.getElementById(target === 'page' ? 'page-alert' : 'login-alert');
     if (!el) return;
     el.textContent = msg;
-    el.className = 'alert alert-' + type + ' show';
+    el.className = 'alert alert-' + (type || 'danger') + ' show';
     el.style.display = 'block';
     setTimeout(() => { el.style.display = 'none'; el.className = 'alert'; }, 5000);
   }
@@ -73,25 +270,17 @@ const App = (function() {
   function formatCurrency(val) {
     return 'R$ ' + parseFloat(val || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
   }
-
   function formatNumber(val) {
     return parseInt(val || 0).toLocaleString('pt-BR');
   }
-
   function getStatusBadge(status) {
-    const map = {
-      'ATIVO': 'success',
-      'MANUTENÇÃO': 'warning',
-      'ARROLAMENTO': 'info',
-      'INATIVO': 'danger',
-      'ATIVO': 'success',
-      'INATIVO': 'danger',
-      'AFASTADO': 'warning'
-    };
+    const map = { 'ATIVO': 'success', 'MANUTENÇÃO': 'warning', 'ARROLAMENTO': 'info', 'INATIVO': 'danger', 'AFASTADO': 'warning' };
     return '<span class="status-badge ' + (map[status] || 'default') + '">' + (status || 'N/A') + '</span>';
   }
 
-  // ========== LOGIN ==========
+  // ========================
+  // LOGIN
+  // ========================
   async function login() {
     const user = document.getElementById('login-user').value;
     const pass = document.getElementById('login-pass').value;
@@ -126,10 +315,25 @@ const App = (function() {
     document.getElementById('app-screen').style.display = 'flex';
     document.body.className = '';
     document.getElementById('user-name').textContent = localStorage.getItem('frota_user') || 'Admin';
+    updateModeBadge();
     loadDashboard();
   }
 
-  // ========== NAVIGATION ==========
+  function updateModeBadge() {
+    const badge = document.getElementById('mode-badge');
+    if (!badge) return;
+    if (isLocalMode) {
+      badge.textContent = '📴 Modo Local';
+      badge.style.display = 'inline-block';
+    } else {
+      badge.textContent = '🌐 Online';
+      badge.style.display = 'inline-block';
+    }
+  }
+
+  // ========================
+  // NAVIGATION
+  // ========================
   function showPage(page) {
     document.querySelectorAll('.page-section').forEach(p => p.classList.remove('active'));
     document.getElementById('page-' + page).classList.add('active');
@@ -137,18 +341,12 @@ const App = (function() {
     document.querySelector('.nav-item[data-page="' + page + '"]').classList.add('active');
 
     const titles = {
-      dashboard: 'Dashboard',
-      vehicles: 'Veículos',
-      fueling: 'Abastecimento',
-      maintenance: 'Manutenção',
-      km: 'Quilometragem',
-      drivers: 'Motoristas',
-      reports: 'Relatórios',
-      import: 'Importar Dados'
+      dashboard: 'Dashboard', vehicles: 'Veículos', fueling: 'Abastecimento',
+      maintenance: 'Manutenção', km: 'Quilometragem', drivers: 'Motoristas',
+      reports: 'Relatórios', import: 'Importar Dados'
     };
     document.getElementById('page-title').textContent = titles[page] || page;
 
-    // Load data
     if (page === 'dashboard') loadDashboard();
     if (page === 'vehicles') loadVehicles();
     if (page === 'fueling') loadFueling();
@@ -158,11 +356,12 @@ const App = (function() {
     if (page === 'reports') loadReports();
     if (page === 'import') initImport();
 
-    // Close mobile sidebar
     document.getElementById('sidebar').classList.remove('open');
   }
 
-  // ========== DASHBOARD ==========
+  // ========================
+  // DASHBOARD
+  // ========================
   async function loadDashboard() {
     const res = await api('getDashboard', {});
     if (res.success && res.data) {
@@ -175,10 +374,10 @@ const App = (function() {
       document.getElementById('kpi-drivers').textContent = d.totalDrivers || 0;
 
       renderRecentList('recent-fuel', d.recentFuel || [], f =>
-        '<div><div class="recent-title">' + f.Placa + '</div><div class="recent-meta">' + f.Data + ' • ' + f.Litros + 'L</div></div><div class="recent-value">' + formatCurrency(f.Valor) + '</div>'
+        '<div><div class="recent-title">' + (f.Placa || f.placa || '-') + '</div><div class="recent-meta">' + (f.Data || f.data || '-') + ' • ' + (f.Litros || f.litros || 0) + 'L</div></div><div class="recent-value">' + formatCurrency(f.Valor || f.valor) + '</div>'
       );
       renderRecentList('recent-maint', d.recentMaintenance || [], m =>
-        '<div><div class="recent-title">' + m.Placa + '</div><div class="recent-meta">' + m.Data + ' • ' + m.Tipo + '</div></div><div class="recent-value">' + formatCurrency(m.Custo) + '</div>'
+        '<div><div class="recent-title">' + (m.Placa || m.placa || '-') + '</div><div class="recent-meta">' + (m.Data || m.data || '-') + ' • ' + (m.Tipo || m.tipo || '-') + '</div></div><div class="recent-value">' + formatCurrency(m.Custo || m.custo) + '</div>'
       );
     }
   }
@@ -189,7 +388,9 @@ const App = (function() {
     el.innerHTML = items.map(fn).map(html => '<li>' + html + '</li>').join('');
   }
 
-  // ========== VEHICLES ==========
+  // ========================
+  // VEHICLES
+  // ========================
   async function loadVehicles() {
     const res = await api('getVehicles', {});
     if (res.success) { vehicles = res.data || []; renderVehicles(); }
@@ -274,7 +475,9 @@ const App = (function() {
     else showAlert(res.error || 'Erro ao excluir', 'danger');
   }
 
-  // ========== FUELING ==========
+  // ========================
+  // FUELING
+  // ========================
   async function loadFueling() {
     const res = await api('getFueling', {});
     if (res.success) { fueling = res.data || []; renderFueling(); }
@@ -284,12 +487,12 @@ const App = (function() {
     const tbody = document.getElementById('fueling-table');
     if (!fueling.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="empty-icon">⛽</div><h4>Nenhum abastecimento</h4></td></tr>'; return; }
     tbody.innerHTML = fueling.map(f =>
-      '<tr><td>' + (f.Data || '-') + '</td>' +
-      '<td><strong>' + (f.Placa || '-') + '</strong></td>' +
-      '<td>' + (f.Motorista || '-') + '</td>' +
-      '<td>' + (f.Litros || 0) + ' L</td>' +
-      '<td>' + formatCurrency(f.Valor) + '</td>' +
-      '<td>' + formatNumber(f.KM) + '</td>' +
+      '<tr><td>' + (f.Data || f.data || '-') + '</td>' +
+      '<td><strong>' + (f.Placa || f.placa || '-') + '</strong></td>' +
+      '<td>' + (f.Motorista || f.motorista || '-') + '</td>' +
+      '<td>' + (f.Litros || f.litros || 0) + ' L</td>' +
+      '<td>' + formatCurrency(f.Valor || f.valor) + '</td>' +
+      '<td>' + formatNumber(f.KM || f.km) + '</td>' +
       '<td><button class="btn btn-sm btn-danger" onclick="App.deleteFueling(\'' + f.ID + '\')">🗑️</button></td></tr>'
     ).join('');
   }
@@ -316,7 +519,9 @@ const App = (function() {
     else showAlert(res.error || 'Erro', 'danger');
   }
 
-  // ========== MAINTENANCE ==========
+  // ========================
+  // MAINTENANCE
+  // ========================
   async function loadMaintenance() {
     const res = await api('getMaintenance', {});
     if (res.success) { maintenance = res.data || []; renderMaintenance(); }
@@ -326,12 +531,12 @@ const App = (function() {
     const tbody = document.getElementById('maintenance-table');
     if (!maintenance.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="empty-icon">🔧</div><h4>Nenhuma manutenção</h4></td></tr>'; return; }
     tbody.innerHTML = maintenance.map(m =>
-      '<tr><td>' + (m.Data || '-') + '</td>' +
-      '<td><strong>' + (m.Placa || '-') + '</strong></td>' +
-      '<td>' + (m.Tipo || '-') + '</td>' +
-      '<td>' + (m.Descricao || '-') + '</td>' +
-      '<td>' + formatCurrency(m.Custo) + '</td>' +
-      '<td>' + getStatusBadge(m.Status) + '</td>' +
+      '<tr><td>' + (m.Data || m.data || '-') + '</td>' +
+      '<td><strong>' + (m.Placa || m.placa || '-') + '</strong></td>' +
+      '<td>' + (m.Tipo || m.tipo || '-') + '</td>' +
+      '<td>' + (m.Descricao || m.descricao || '-') + '</td>' +
+      '<td>' + formatCurrency(m.Custo || m.custo) + '</td>' +
+      '<td>' + getStatusBadge(m.Status || m.status) + '</td>' +
       '<td><button class="btn btn-sm btn-danger" onclick="App.deleteMaintenance(\'' + m.ID + '\')">🗑️</button></td></tr>'
     ).join('');
   }
@@ -358,7 +563,9 @@ const App = (function() {
     else showAlert(res.error || 'Erro', 'danger');
   }
 
-  // ========== KM ==========
+  // ========================
+  // KM
+  // ========================
   async function loadKm() {
     const res = await api('getKm', {});
     if (res.success) { km = res.data || []; renderKm(); }
@@ -368,13 +575,13 @@ const App = (function() {
     const tbody = document.getElementById('km-table');
     if (!km.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><div class="empty-icon">📍</div><h4>Nenhum registro</h4></td></tr>'; return; }
     tbody.innerHTML = km.map(k => {
-      const diff = parseInt(k.KMAtual || 0) - parseInt(k.KMAnterior || 0);
-      return '<tr><td>' + (k.Data || '-') + '</td>' +
-        '<td><strong>' + (k.Placa || '-') + '</strong></td>' +
-        '<td>' + formatNumber(k.KMAnterior) + '</td>' +
-        '<td>' + formatNumber(k.KMAtual) + '</td>' +
+      const diff = parseInt(k.KMAtual || k.kmAtual || 0) - parseInt(k.KMAnterior || k.kmAnterior || 0);
+      return '<tr><td>' + (k.Data || k.data || '-') + '</td>' +
+        '<td><strong>' + (k.Placa || k.placa || '-') + '</strong></td>' +
+        '<td>' + formatNumber(k.KMAnterior || k.kmAnterior) + '</td>' +
+        '<td>' + formatNumber(k.KMAtual || k.kmAtual) + '</td>' +
         '<td>' + formatNumber(diff) + '</td>' +
-        '<td>' + (k.Motorista || '-') + '</td></tr>';
+        '<td>' + (k.Motorista || k.motorista || '-') + '</td></tr>';
     }).join('');
   }
 
@@ -399,7 +606,9 @@ const App = (function() {
     else showAlert(res.error || 'Erro', 'danger');
   }
 
-  // ========== DRIVERS ==========
+  // ========================
+  // DRIVERS
+  // ========================
   async function loadDrivers() {
     const res = await api('getDrivers', {});
     if (res.success) { drivers = res.data || []; renderDrivers(); }
@@ -409,11 +618,11 @@ const App = (function() {
     const tbody = document.getElementById('drivers-table');
     if (!drivers.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><div class="empty-icon">👤</div><h4>Nenhum motorista</h4></td></tr>'; return; }
     tbody.innerHTML = drivers.map(d =>
-      '<tr><td><strong>' + (d.Nome || '-') + '</strong></td>' +
-      '<td>' + (d.CPF || '-') + '</td>' +
-      '<td>' + (d.CNH || '-') + '</td>' +
-      '<td>' + (d.Categoria || '-') + '</td>' +
-      '<td>' + getStatusBadge(d.Status) + '</td>' +
+      '<tr><td><strong>' + (d.Nome || d.nome || '-') + '</strong></td>' +
+      '<td>' + (d.CPF || d.cpf || '-') + '</td>' +
+      '<td>' + (d.CNH || d.cnh || '-') + '</td>' +
+      '<td>' + (d.Categoria || d.categoria || '-') + '</td>' +
+      '<td>' + getStatusBadge(d.Status || d.status) + '</td>' +
       '<td><button class="btn btn-sm btn-secondary" onclick="App.editDriver(\'' + d.ID + '\')">✏️</button> ' +
       '<button class="btn btn-sm btn-danger" onclick="App.deleteDriver(\'' + d.ID + '\')">🗑️</button></td></tr>'
     ).join('');
@@ -423,12 +632,12 @@ const App = (function() {
     const d = drivers.find(x => x.ID === id);
     if (!d) return;
     editingDriver = id;
-    document.getElementById('d-nome').value = d.Nome || '';
-    document.getElementById('d-cpf').value = d.CPF || '';
-    document.getElementById('d-cnh').value = d.CNH || '';
-    document.getElementById('d-categoria').value = d.Categoria || 'B';
-    document.getElementById('d-telefone').value = d.Telefone || '';
-    document.getElementById('d-status').value = d.Status || 'ATIVO';
+    document.getElementById('d-nome').value = d.Nome || d.nome || '';
+    document.getElementById('d-cpf').value = d.CPF || d.cpf || '';
+    document.getElementById('d-cnh').value = d.CNH || d.cnh || '';
+    document.getElementById('d-categoria').value = d.Categoria || d.categoria || 'B';
+    document.getElementById('d-telefone').value = d.Telefone || d.telefone || '';
+    document.getElementById('d-status').value = d.Status || d.status || 'ATIVO';
     openModal('driver-modal');
   }
 
@@ -454,9 +663,10 @@ const App = (function() {
     else showAlert(res.error || 'Erro', 'danger');
   }
 
-  // ========== REPORTS ==========
+  // ========================
+  // REPORTS
+  // ========================
   function loadReports() {
-    // Simple placeholder charts using canvas
     drawSimpleBarChart('chart-fuel', [1200, 1500, 800, 2000, 1800, 2200], ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun']);
     drawSimpleLineChart('chart-km', [5000, 6200, 4800, 7100, 6500, 7800], ['S1', 'S2', 'S3', 'S4', 'S5', 'S6']);
   }
@@ -516,7 +726,9 @@ const App = (function() {
     });
   }
 
-  // ========== IMPORT ==========
+  // ========================
+  // IMPORT
+  // ========================
   function initImport() {
     const preview = document.getElementById('import-preview');
     preview.value = JSON.stringify(IMPORT_DATA, null, 2);
@@ -533,12 +745,17 @@ const App = (function() {
     else showAlert(res.error || 'Erro na importação', 'danger');
   }
 
-  // ========== MODAL ==========
+  // ========================
+  // MODAL
+  // ========================
   function openModal(id) { document.getElementById(id).classList.add('show'); }
   function closeModal(id) { document.getElementById(id).classList.remove('show'); }
 
-  // ========== INIT ==========
+  // ========================
+  // INIT
+  // ========================
   function init() {
+    updateModeBadge();
     if (token) showApp(); else showLogin();
 
     document.getElementById('btn-login').addEventListener('click', login);
@@ -553,7 +770,6 @@ const App = (function() {
     document.getElementById('vehicle-status-filter').addEventListener('change', renderVehicles);
     document.getElementById('btn-import').addEventListener('click', importVehicles);
 
-    // PWA
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(console.error);
     }
