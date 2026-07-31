@@ -9,7 +9,7 @@
 
 const CONFIG = {
   // SUBSTITUA pela URL real do seu Web App do Google Apps Script:
-  API_URL: 'https://script.google.com/macros/s/YOUR_GOOGLE_SCRIPT_URL_HERE/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbw33-UhHtDVJnmbTzcEFmXgbXV6k67rkHImwsRzXtsyiE0mD62KSodKQIYEVU-nUVqJGA/exec',
 
   VERSION: '3.0',
   APP_NAME: 'Frota Pro',
