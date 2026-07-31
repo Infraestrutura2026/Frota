@@ -5,7 +5,7 @@
 // após implantar (Deploy > New deployment > Web app)
 
 const CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/YOUR_GOOGLE_SCRIPT_URL_HERE/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyjpjcBdMxE47xNF9ZTNRfnn1AjxKzn_fLHx2ecbPWfjpjI_D1i86fZfasEy_JaW_1dRw/exec',
   VERSION: '3.0',
   APP_NAME: 'Frota Pro'
 };
