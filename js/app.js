@@ -15,38 +15,39 @@ const App = (function() {
   let editingDriver = null;
 
   // ========================
-  // DADOS DOS 29 VEÍCULOS
+  // DADOS DOS 29 VEÍCULOS - COMPLEXO PENAL DE MARÍLIA
+  // Fonte: planilha COMPLEXO PENAL DE MARÍLIA - 17.07.2026 (abas S2, S3, S4)
   // ========================
   const IMPORT_DATA = [
-    { placa: 'RJJ7A31', grupo: 'S2', marca: 'Hyundai', modelo: 'HB20S', ano: 2022, cor: 'Prata', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'FLEX', capacidade: 5 },
-    { placa: 'EMK3G05', grupo: 'S2', marca: 'Hyundai', modelo: 'HB20S', ano: 2022, cor: 'Prata', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'FLEX', capacidade: 5 },
-    { placa: 'EXC9E72', grupo: 'S2', marca: 'Hyundai', modelo: 'HB20S', ano: 2022, cor: 'Prata', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'FLEX', capacidade: 5 },
-    { placa: 'EXF0G42', grupo: 'S2', marca: 'Hyundai', modelo: 'HB20S', ano: 2022, cor: 'Prata', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'FLEX', capacidade: 5 },
-    { placa: 'EWT7G13', grupo: 'S2', marca: 'Hyundai', modelo: 'HB20S', ano: 2022, cor: 'Prata', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'FLEX', capacidade: 5 },
-    { placa: 'FAE1H56', grupo: 'S2', marca: 'Hyundai', modelo: 'HB20S', ano: 2022, cor: 'Prata', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'FLEX', capacidade: 5 },
-    { placa: 'FAE2I03', grupo: 'S3', marca: 'Fiat', modelo: 'Strada', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'FLEX', capacidade: 5 },
-    { placa: 'FAE3J24', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE4K56', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE5L78', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE6M90', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE7N12', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE8O34', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE9P56', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE0Q78', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE1R90', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE2S12', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE3T34', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE4U56', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE5V78', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE6W90', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE7X12', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE8Y34', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE9Z56', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE0A78', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE1B90', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE2C12', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE3D34', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 },
-    { placa: 'FAE4E56', grupo: 'S4', marca: 'Toyota', modelo: 'Hilux', ano: 2023, cor: 'Branca', chassi: '', renavam: '', hodometro: 0, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 5 }
+    { placa: 'CUQ3I89', grupo: 'S2', marca: 'GM / CHEVROLET', modelo: 'SPIN', ano: 2025, cor: 'BRANCA', chassi: '9BGJB7520SB170141', renavam: '1411081703', hodometro: 52952, status: 'ATIVO', combustivel: 'ETANOL', capacidade: 5 },
+    { placa: 'CUW3J07', grupo: 'S2', marca: 'GM / CHEVROLET', modelo: 'SPIN', ano: 2025, cor: 'BRANCA', chassi: '9BGJB7520SN171682', renavam: '1411079865', hodometro: 92369, status: 'ATIVO', combustivel: 'ETANOL', capacidade: 5 },
+    { placa: 'TIT8E83', grupo: 'S2', marca: 'GM / CHEVROLET', modelo: 'SPIN', ano: 2025, cor: 'BRANCA', chassi: '9BGJB7520SB195053', renavam: '1408048016', hodometro: 52906, status: 'ATIVO', combustivel: 'ETANOL', capacidade: 5 },
+    { placa: 'TIV8C29', grupo: 'S2', marca: 'GM / CHEVROLET', modelo: 'SPIN', ano: 2025, cor: 'BRANCA', chassi: '9BGJB7520SB174833', renavam: '1413413584', hodometro: 80003, status: 'ATIVO', combustivel: 'ETANOL', capacidade: 5 },
+    { placa: 'TJY6A21', grupo: 'S2', marca: 'RENAULT', modelo: 'MASTER MINIBUS', ano: 2025, cor: 'BRANCA', chassi: '93YJ62001SJ015179', renavam: '1413828261', hodometro: 57902, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 16 },
+    { placa: 'TLM2D25', grupo: 'S2', marca: 'GM / CHEVROLET', modelo: 'SPIN', ano: 2025, cor: 'BRANCA', chassi: '9BGJB7520SB179579', renavam: '1413413460', hodometro: 57662, status: 'ATIVO', combustivel: 'ETANOL', capacidade: 5 },
+    { placa: 'FJF0688', grupo: 'S3', marca: 'FORD', modelo: 'F-4000', ano: 2018, cor: 'BRANCA', chassi: '9BFLF47P8JB012768', renavam: '1136808709', hodometro: 165873, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 3 },
+    { placa: 'BRZ7720', grupo: 'S4', marca: 'GMC', modelo: '12170', ano: 1996, cor: 'BRANCA', chassi: '1GDM7H1J9TJ516578', renavam: '673310957', hodometro: 311382, status: 'MANUTENÇÃO', combustivel: 'DIESEL', capacidade: 3 },
+    { placa: 'BVZ5E97', grupo: 'S4', marca: 'MERCEDES-BENZ', modelo: 'COMIL SVELTO U', ano: 1999, cor: 'PRETA', chassi: '9BM384073WB180715', renavam: '711698007', hodometro: 242225, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 40 },
+    { placa: 'CFY2G52', grupo: 'S4', marca: 'TOYOTA', modelo: 'HILUX SW4', ano: 2013, cor: 'PRATA', chassi: '8AJZX62G7D5004683', renavam: '585788421', hodometro: 154152, status: 'ATIVO', combustivel: 'ETANOL', capacidade: 5 },
+    { placa: 'CFY2G97', grupo: 'S4', marca: 'TOYOTA', modelo: 'HILUX SW4', ano: 2013, cor: 'PRETA', chassi: '8AJZX62G0D5004217', renavam: '585884404', hodometro: 246909, status: 'ARROLAMENTO', combustivel: 'ETANOL', capacidade: 5 },
+    { placa: 'CMW9549', grupo: 'S4', marca: 'IVECO', modelo: 'DAILY 7012', ano: 2004, cor: 'BRANCA', chassi: '93ZC6680148315934', renavam: '847718328', hodometro: 106805, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 3 },
+    { placa: 'CST0H92', grupo: 'S4', marca: 'IVECO', modelo: 'GCLASS 150', ano: 2020, cor: 'FANTASIA', chassi: '93ZA01LF0L8938076', renavam: '1258031083', hodometro: 33669, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 34 },
+    { placa: 'DJL7937', grupo: 'S4', marca: 'IVECO', modelo: 'DAILY 70C16', ano: 2011, cor: 'PRATA', chassi: '93ZC68B01B8426929', renavam: '408793678', hodometro: 167185, status: 'ARROLAMENTO', combustivel: 'DIESEL', capacidade: 20 },
+    { placa: 'EEF7G88', grupo: 'S4', marca: 'GM / CHEVROLET', modelo: 'S10', ano: 2010, cor: 'PRATA', chassi: '9BG124GJ0AC441989', renavam: '201565498', hodometro: 602982, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 6 },
+    { placa: 'FCK5196', grupo: 'S4', marca: 'GM / CHEVROLET', modelo: 'S10', ano: 2015, cor: 'PRATA', chassi: '9BG144DK0FC412999', renavam: '1041251359', hodometro: 466636, status: 'MANUTENÇÃO', combustivel: 'DIESEL', capacidade: 6 },
+    { placa: 'FCW8I62', grupo: 'S4', marca: 'CITROEN', modelo: 'JUMPY GREE AMB', ano: 2022, cor: 'BRANCA', chassi: '9V7VBBHXGNA802179', renavam: '1281132494', hodometro: 110240, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 4 },
+    { placa: 'FJG7158', grupo: 'S4', marca: 'GM / CHEVROLET', modelo: 'S10', ano: 2015, cor: 'PRATA', chassi: '9BG144DK0FC414069', renavam: '1041251545', hodometro: 265891, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 6 },
+    { placa: 'FKE6H32', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', chassi: '95PDCM61DPB019144', renavam: '1329600115', hodometro: 282733, status: 'ATIVO', combustivel: 'GASOLINA', capacidade: 7 },
+    { placa: 'FKN6069', grupo: 'S4', marca: 'FORD', modelo: 'CARGO 816 S', ano: 2018, cor: 'PRATA', chassi: '9BFVEADS9JBS44959', renavam: '1148048860', hodometro: 218324, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 16 },
+    { placa: 'FML8H43', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', chassi: '95PDCM61DPB019186', renavam: '1329583393', hodometro: 221400, status: 'MANUTENÇÃO', combustivel: 'GASOLINA', capacidade: 7 },
+    { placa: 'FMM5G11', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', chassi: '95PDCM61DPB018143', renavam: '1329615686', hodometro: 248248, status: 'ATIVO', combustivel: 'GASOLINA', capacidade: 7 },
+    { placa: 'FRR1B42', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', chassi: '95PDCM61DPB019857', renavam: '1329625185', hodometro: 259728, status: 'MANUTENÇÃO', combustivel: 'GASOLINA', capacidade: 7 },
+    { placa: 'FSH3I13', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', chassi: '95PDCM61DPB018073', renavam: '1329588590', hodometro: 282851, status: 'MANUTENÇÃO', combustivel: 'GASOLINA', capacidade: 7 },
+    { placa: 'FSW4013', grupo: 'S4', marca: 'GM / CHEVROLET', modelo: 'S10', ano: 2015, cor: 'PRATA', chassi: '9BG144DK0FC412617', renavam: '1041251499', hodometro: 485585, status: 'MANUTENÇÃO', combustivel: 'DIESEL', capacidade: 6 },
+    { placa: 'FTQ3C13', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', chassi: '95PDCM61DPB018956', renavam: '1329614086', hodometro: 213986, status: 'MANUTENÇÃO', combustivel: 'GASOLINA', capacidade: 7 },
+    { placa: 'FUW4H93', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', chassi: '95PDCM61DPB017004', renavam: '1329625061', hodometro: 93631, status: 'ATIVO', combustivel: 'GASOLINA', capacidade: 7 },
+    { placa: 'FYI5976', grupo: 'S4', marca: 'RENAULT', modelo: 'MASTER', ano: 2018, cor: 'BRANCA', chassi: '93YMAFEXAJJ205006', renavam: '1141330951', hodometro: 140580, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 4 },
+    { placa: 'GIT5825', grupo: 'S4', marca: 'MITSUBISHI', modelo: 'OUTLANDER 2.0 P', ano: 2020, cor: 'PRATA', chassi: 'JMYXTGF7WLZA00114', renavam: '1216646934', hodometro: 233678, status: 'ATIVO', combustivel: 'GASOLINA', capacidade: 7 }
   ];
 
   // ========================
