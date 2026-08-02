@@ -14,8 +14,8 @@
 
 const CONFIG = {
   // SUBSTITUA pelos valores reais do seu projeto Supabase:
-  SUPABASE_URL: 'https://SEU-PROJETO.supabase.co',
-  SUPABASE_KEY: 'SUA-CHAVE-ANON-PUBLIC-AQUI',
+  SUPABASE_URL: 'https://xmfycyxpmspdpxwmkjzz.supabase.co',
+  SUPABASE_KEY: 'sb_publishable_WUuyYXBhtsM9p9IiW3GWFw_vixnqWOW',
 
   VERSION: '3.0',
   APP_NAME: 'Frota Pro',
