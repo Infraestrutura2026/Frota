@@ -698,6 +698,29 @@ const App = (function() {
     document.getElementById('kpi-km-month').textContent = kmMonth.toLocaleString('pt-BR') + ' km';
     document.getElementById('kpi-drivers').textContent = drivers.length;
 
+    // Atualiza Barra de Disponibilidade da Frota
+    const activePct = total > 0 ? Math.round((active / total) * 100) : 0;
+    const maintPct = total > 0 ? Math.round((maint / total) * 100) : 0;
+    const other = Math.max(0, total - active - maint);
+    const otherPct = total > 0 ? Math.max(0, 100 - activePct - maintPct) : 0;
+
+    const pctEl = document.getElementById('fleet-availability-pct');
+    if (pctEl) pctEl.textContent = `${activePct}% Operacional (${active}/${total} viaturas)`;
+
+    const barActive = document.getElementById('bar-active');
+    const barMaint = document.getElementById('bar-maint');
+    const barOther = document.getElementById('bar-other');
+    if (barActive) barActive.style.width = `${activePct}%`;
+    if (barMaint) barMaint.style.width = `${maintPct}%`;
+    if (barOther) barOther.style.width = `${otherPct}%`;
+
+    const lblActive = document.getElementById('lbl-active');
+    const lblMaint = document.getElementById('lbl-maint');
+    const lblOther = document.getElementById('lbl-other');
+    if (lblActive) lblActive.textContent = `${active} Operacionais`;
+    if (lblMaint) lblMaint.textContent = `${maint} Em Manutenção`;
+    if (lblOther) lblOther.textContent = `${other} Arrolamento / Outros`;
+
     const recentFuelEl = document.getElementById('recent-fuel');
     if (recentFuelEl) {
       recentFuelEl.innerHTML = fueling.slice(-5).reverse().map(f => `
@@ -805,12 +828,12 @@ const App = (function() {
     const tbody = document.getElementById('vehicles-table');
     tbody.innerHTML = filtered.map(v => `
       <tr>
-        <td><b>${v.placa}</b></td>
-        <td><span class="badge badge-default">${v.grupo || '-'}</span></td>
-        <td>${v.marca || ''} ${v.modelo || ''}</td>
+        <td><span class="placa-badge">${v.placa}</span></td>
+        <td><span class="badge default">${v.grupo || '-'}</span></td>
+        <td><b>${v.marca || ''}</b> ${v.modelo || ''}</td>
         <td>${v.ano || '-'}</td>
         <td><b>${(v.hodometro || 0).toLocaleString('pt-BR')} km</b></td>
-        <td><span class="badge ${badgeClass(v.status)}">${v.status || 'ATIVO'}</span></td>
+        <td><span class="badge ${badgeClass(v.status)}"><span class="status-dot"></span>${v.status || 'ATIVO'}</span></td>
         <td>${v.combustivel || '-'}</td>
         <td>
           <button class="btn btn-sm btn-primary" title="Editar Veículo" onclick="App.editVehicle(${v.id})">✏️</button>
@@ -901,11 +924,11 @@ const App = (function() {
       return `
         <tr>
           <td>${f.data ? formatDateBR(f.data) : '-'}</td>
-          <td><b>${f.placa}</b></td>
-          <td>${f.motorista || '-'}</td>
+          <td><span class="placa-badge">${f.placa}</span></td>
+          <td><b>${f.motorista || '-'}</b></td>
           <td>${parseFloat(f.litros || 0).toFixed(2)} L</td>
           <td><b>R$ ${parseFloat(f.valor || 0).toFixed(2).replace('.', ',')}</b></td>
-          <td>R$ ${unit}</td>
+          <td style="color:var(--text-muted);">R$ ${unit}</td>
           <td>${(f.km || 0).toLocaleString('pt-BR')} km</td>
           <td>${f.posto || '-'}</td>
           <td>
@@ -983,11 +1006,11 @@ const App = (function() {
     tbody.innerHTML = maintenance.slice().reverse().map(m => `
       <tr>
         <td>${m.data ? formatDateBR(m.data) : '-'}</td>
-        <td><b>${m.placa}</b></td>
-        <td>${m.tipo || 'Preventiva'}</td>
+        <td><span class="placa-badge">${m.placa}</span></td>
+        <td><b>${m.tipo || 'Preventiva'}</b></td>
         <td>${m.descricao || '-'}</td>
-        <td><b>R$ ${parseFloat(m.custo || 0).toFixed(2).replace('.', ',')}</b></td>
-        <td><span class="badge ${m.status === 'Concluído' ? 'success' : 'warning'}">${m.status || 'Pendente'}</span></td>
+        <td><b style="color:#fbbf24;">R$ ${parseFloat(m.custo || 0).toFixed(2).replace('.', ',')}</b></td>
+        <td><span class="badge ${m.status === 'Concluído' ? 'success' : 'warning'}"><span class="status-dot"></span>${m.status || 'Pendente'}</span></td>
         <td>${m.oficina || '-'}</td>
         <td>
           <button class="btn btn-sm btn-primary" title="Editar Manutenção" onclick="App.editMaintenance(${m.id})">✏️</button>
@@ -1070,14 +1093,14 @@ const App = (function() {
       return `
         <tr>
           <td>${k.data ? formatDateBR(k.data) : '-'}</td>
-          <td><b>${k.placa}</b></td>
+          <td><span class="placa-badge">${k.placa}</span></td>
           <td>${(k.km_anterior || 0).toLocaleString('pt-BR')} km</td>
           <td><b>${(k.km_atual || 0).toLocaleString('pt-BR')} km</b></td>
-          <td style="color:${diff >= 0 ? 'var(--success)' : 'var(--danger)'};font-weight:600;">
+          <td style="color:${diff >= 0 ? 'var(--success)' : 'var(--danger)'};font-weight:700;">
             ${diff >= 0 ? '+' : ''}${diff.toLocaleString('pt-BR')} km
           </td>
-          <td>${k.motorista || '-'}</td>
-          <td><small>${k.observacao || '-'}</small></td>
+          <td><b>${k.motorista || '-'}</b></td>
+          <td><small style="color:var(--text-muted);">${k.observacao || '-'}</small></td>
           <td>
             <button class="btn btn-sm btn-primary" title="Editar Viagem / KM" onclick="App.editKm(${k.id})">✏️</button>
             <button class="btn btn-sm btn-danger" title="Excluir Lançamento" onclick="App.deleteKm(${k.id})">🗑️</button>
@@ -1173,9 +1196,9 @@ const App = (function() {
         const venc = new Date(d.cnh_vencimento + 'T00:00:00');
         const dias = Math.ceil((venc - hoje) / (1000 * 60 * 60 * 24));
         if (dias < 0) {
-          vencBadge = `<span class="badge danger" title="Venceu há ${Math.abs(dias)} dias">${formatDateBR(d.cnh_vencimento)} (Vencida)</span>`;
+          vencBadge = `<span class="badge danger" title="Venceu há ${Math.abs(dias)} dias"><span class="status-dot"></span>${formatDateBR(d.cnh_vencimento)} (Vencida)</span>`;
         } else if (dias <= 30) {
-          vencBadge = `<span class="badge warning" title="Vence em ${dias} dias">${formatDateBR(d.cnh_vencimento)} (${dias}d)</span>`;
+          vencBadge = `<span class="badge warning" title="Vence em ${dias} dias"><span class="status-dot"></span>${formatDateBR(d.cnh_vencimento)} (${dias}d)</span>`;
         } else {
           vencBadge = `${formatDateBR(d.cnh_vencimento)}`;
         }
@@ -1185,10 +1208,10 @@ const App = (function() {
         <tr>
           <td><b>${d.nome}</b></td>
           <td>${d.cpf || '-'}</td>
-          <td>${d.cnh || '-'}</td>
+          <td><code>${d.cnh || '-'}</code></td>
           <td>${vencBadge}</td>
-          <td><span class="badge badge-default">${d.categoria || 'B'}</span></td>
-          <td><span class="badge ${d.status === 'ATIVO' ? 'success' : 'danger'}">${d.status || 'ATIVO'}</span></td>
+          <td><span class="badge default">${d.categoria || 'B'}</span></td>
+          <td><span class="badge ${d.status === 'ATIVO' ? 'success' : 'danger'}"><span class="status-dot"></span>${d.status || 'ATIVO'}</span></td>
           <td>
             <button class="btn btn-sm btn-primary" title="Editar Motorista" onclick="App.editDriver(${d.id})">✏️</button>
             <button class="btn btn-sm btn-danger" title="Excluir Motorista" onclick="App.deleteDriver(${d.id})">🗑️</button>
