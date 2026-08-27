@@ -1,116 +1,91 @@
-# Frota Pro v3.0 — Versão Online (Supabase)
+# Frota Pro v3.0 — Sistema de Gestão de Frotas
+**Complexo Penal de Marília — Secretaria da Administração Penitenciária**
 
-Sistema de Gestão de Frotas com backend real via **Supabase** (PostgreSQL + API REST), mantendo todos os 29 veículos do Complexo Penal de Marília e todas as funcionalidades originais.
-
-## O que mudou na versão online?
-
-| Recurso | Local (v3.0) | Online (v3.0) |
-|---------|-------------|---------------|
-| Backend | Google Apps Script / localStorage | **Supabase API REST** |
-| Banco de dados | Nenhum (planilha ou local) | **PostgreSQL real** |
-| Multiusuário | Não | **Sim** (tabela `users`) |
-| Persistência | Apenas neste navegador | **Nuvem — acessível de qualquer dispositivo** |
-| Offline | Funciona sem internet | **Fallback local** se Supabase não estiver configurado |
-
-## Estrutura do projeto
-
-```
-frota-online/
-├── index.html          # Interface PWA (login, dashboard, módulos)
-├── css/style.css       # Estilos completos
-├── js/
-│   ├── config.js       # URL e chave do Supabase (CONFIGURE AQUI)
-│   └── app.js          # Lógica com Supabase + fallback local
-├── images/             # Ícones PWA (192, 512, favicon)
-├── manifest.json       # Manifesto PWA
-├── sw.js               # Service Worker (offline cache)
-├── supabase-setup.sql  # DDL para criar tabelas no Supabase
-└── README.md           # Este arquivo
-```
-
-## Como colocar online (passo a passo)
-
-### 1. Criar conta no Supabase
-
-1. Acesse [https://supabase.com](https://supabase.com)
-2. Crie uma conta gratuita
-3. Clique em **"New Project"** e dê um nome (ex: `frota-pro`)
-4. Aguarde a criação (1-2 minutos)
-
-### 2. Criar as tabelas
-
-1. No painel do Supabase, vá em **SQL Editor** (ícone de terminal)
-2. Cole TODO o conteúdo do arquivo `supabase-setup.sql`
-3. Clique em **Run** — as tabelas serão criadas automaticamente
-
-### 3. Obter URL e chave da API
-
-1. Vá em **Project Settings > API**
-2. Copie a **URL** (ex: `https://abcde1234567890.supabase.co`)
-3. Copie a **anon public** API Key (ex: `eyJhbGciOiJIUzI1NiIs...`)
-
-### 4. Configurar o app
-
-Abra o arquivo `js/config.js` e substitua os valores:
-
-```js
-SUPABASE_URL: 'https://SEU-PROJETO.supabase.co',
-SUPABASE_KEY: 'SUA-CHAVE-ANON-PUBLIC-AQUI',
-```
-
-### 5. Hospedar os arquivos estáticos
-
-O Frota Pro é um **PWA estático** (HTML/CSS/JS). Você pode hospedar em qualquer lugar:
-
-| Opção | Como fazer |
-|-------|-----------|
-| **Vercel** (recomendado) | Arraste a pasta `frota-online` em [vercel.com](https://vercel.com) |
-| **Netlify** | Arraste a pasta em [netlify.com](https://netlify.com) |
-| **GitHub Pages** | Suba em um repo e ative Pages nas configurações |
-| **Servidor próprio** | Envie os arquivos via FTP para `/public_html/` |
-| **Supabase Storage** | Hospede direto no Storage do próprio Supabase |
-
-### 6. Configurar CORS (se necessário)
-
-1. No Supabase, vá em **API > Settings**
-2. Adicione o domínio onde hospedou o app em **Allowed Origins**
-3. Exemplo: `https://meu-frota.vercel.app`
-
-### 7. Acessar o sistema
-
-1. Abra a URL onde hospedou
-2. Login padrão: `admin` / `admin2025`
-3. Pronto! Todos os dados serão salvos no Supabase
-
-## Tabelas do banco de dados
-
-| Tabela | Descrição |
-|--------|-----------|
-| `users` | Usuários do sistema (login) |
-| `vehicles` | Cadastro de veículos (29 iniciais) |
-| `fueling` | Registros de abastecimento |
-| `maintenance` | Ordens de manutenção |
-| `km_records` | Lançamentos de quilometragem |
-| `drivers` | Cadastro de motoristas |
-
-## Modo Offline (fallback)
-
-Se o Supabase não estiver configurado (ou estiver fora do ar), o app **automaticamente cai para modo local**:
-- Dados salvos no `localStorage` do navegador
-- Funciona 100% sem internet
-- Quando o Supabase voltar, basta sincronizar (importar)
-
-## Dicas de segurança
-
-- **Mude a senha padrão** do usuário `admin` após o primeiro acesso
-- Para produção, habilite **Row Level Security (RLS)** no Supabase e crie políticas por usuário
-- Use **HTTPS** obrigatoriamente (Vercel/Netlify já fazem isso)
-- Faça backup periódico do banco via Supabase Dashboard > Database > Backups
-
-## Suporte
-
-Se precisar de ajuda para configurar o Supabase ou hospedar o app, é só pedir!
+Sistema completo para gestão operacional e controle de frotas com suporte híbrido: **Nuvem (Supabase / PostgreSQL)** e **Modo Local (Offline-First via PWA)**, mantendo os 29 veículos institucionais e todo o histórico de operações.
 
 ---
 
-**Frota Pro v3.0** — Complexo Penal de Marília 🚗
+## 🚀 Principais Recursos e Melhorias Implementadas
+
+1. **Arquitetura Híbrida Resiliente (Online & Offline Real):**
+   - Conexão em nuvem via **Supabase API REST (PostgreSQL)**.
+   - **Fallback automático transparente:** Se a internet ou o Supabase caírem, o sistema opera normalmente no navegador via `localStorage` sem travar a interface.
+   - Sincronização de dados e pré-carga automática dos 29 veículos oficiais.
+
+2. **Controle Integrado de Hodômetro (Odômetro Automático):**
+   - Ao lançar uma viagem ou abastecimento, o sistema compara a quilometragem e **atualiza automaticamente o hodômetro do veículo** no cadastro geral.
+   - Preenchimento inteligente: ao selecionar uma placa, o sistema busca e preenche o odômetro atual como KM de saída.
+   - Cálculo instantâneo da distância percorrida e alerta contra inconsistências (KM retorno menor que KM saída).
+
+3. **CRUD Completo em Todos os Módulos:**
+   - **Veículos:** Cadastro, edição, busca e exclusão com proteção para administradores.
+   - **Abastecimento:** Registro e edição com cálculo automático do preço por litro (R$/L) e odômetro do veículo.
+   - **Manutenção:** Registro e edição de ordens de serviço (Preventiva, Corretiva, Revisões), custo e fornecedor/oficina.
+   - **Quilometragem / Viagens:** Registro completo com KM de saída, retorno, motorista e finalidade da viagem.
+   - **Motoristas:** Cadastro completo com monitoramento de validade da CNH e suporte para condutores em processo de renovação.
+   - **Usuários:** Perfis de Administrador e Operador com hashing SHA-256.
+
+4. **Painel Geral (Dashboard) com Ações Rápidas e Alertas:**
+   - Botões de atalho no topo para agilizar os lançamentos diários.
+   - **Banner de Alertas Proativos:** Notifica imediatamente sobre motoristas com CNH vencida ou a vencer nos próximos 30 dias e veículos em oficina.
+   - Indicadores de total da frota, veículos ativos, manutenções, gastos mensais com combustível e KM rodado no mês.
+
+5. **12 Relatórios Gerenciais com Exportação e Impressão Oficial:**
+   - Custo total por veículo (combustível + oficina).
+   - Consumo médio (KM/L).
+   - Manutenções detalhadas.
+   - Vencimento de CNH com ordenação por urgência.
+   - Veículos parados / em arrolamento / em manutenção.
+   - Quilometragem rodada por motorista e por período.
+   - Disponibilidade da frota e utilização por grupos (S2, S3, S4).
+   - **Exportação para Excel (CSV em UTF-8 com BOM).**
+   - **Impressão Oficial / PDF:** Layout formatado para folha A4 com cabeçalho institucional do Governo do Estado de São Paulo e campos para assinatura do Responsável e do Condutor.
+
+---
+
+## 📁 Estrutura do Projeto
+
+```
+Frota/
+├── index.html          # Interface PWA responsiva (Dashboard, Módulos, Modais e Impressão)
+├── css/style.css       # Folha de estilos completa (Design moderno dark, alertas, toasts e print)
+├── js/
+│   ├── config.js       # Configurações de API do Supabase e parâmetros da versão
+│   └── app.js          # Lógica completa (CRUD, relatórios, fallback offline, auto-odômetro)
+├── images/             # Ícones PWA (72x72 até 512x512)
+├── manifest.json       # Manifesto PWA para instalação como app no desktop/celular
+├── sw.js               # Service Worker com estratégia Network-First e cache offline
+├── supabase-setup.sql  # Script DDL com tabelas, restrições UNIQUE e índices de alta performance
+└── README.md           # Documentação completa
+```
+
+---
+
+## 🛠️ Configuração e Execução
+
+### Acesso Rápido Local (Desenvolvimento / Teste)
+O sistema pode ser executado em qualquer servidor HTTP estático (ou abrindo `index.html` diretamente):
+```bash
+python3 -m http.server 8080
+```
+Acesse no navegador: `http://localhost:8080`
+
+### Usuário Padrão para Login:
+- **Usuário:** `admin`
+- **Senha:** `admin2025`
+
+### Configuração com Supabase (Opcional para Sincronização em Nuvem):
+1. Crie um projeto em [supabase.com](https://supabase.com).
+2. Execute o conteúdo do arquivo `supabase-setup.sql` no **SQL Editor**.
+3. Em **Project Settings > API**, copie a **URL** e a **anon public API Key**.
+4. Configure os valores no arquivo `js/config.js`:
+   ```javascript
+   SUPABASE_URL: 'https://SEU-PROJETO.supabase.co',
+   SUPABASE_KEY: 'SUA-CHAVE-ANON-PUBLIC',
+   ```
+
+---
+
+## 📋 Veículos Oficiais Pré-Cadastrados (Complexo Penal de Marília)
+
+O sistema já vem integrado com o catálogo oficial dos **29 veículos** (GM Spin, Renault Master, Ford F-4000, Mercedes Comil, Toyota Hilux SW4, Iveco Daily, GM S10, Tiggo 8, Mitsubishi Outlander, etc.), organizados por grupos (S2, S3, S4).

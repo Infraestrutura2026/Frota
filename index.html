@@ -85,6 +85,17 @@
 
     <!-- ===== DASHBOARD ===== -->
     <div id="page-dashboard" class="page-section active">
+      <!-- Quick Actions -->
+      <div class="quick-actions">
+        <button type="button" class="quick-btn" onclick="App.openModal('fueling-modal')">⛽ Registrar Abastecimento</button>
+        <button type="button" class="quick-btn" onclick="App.openModal('km-modal')">📍 Registrar KM / Viagem</button>
+        <button type="button" class="quick-btn" onclick="App.openModal('maintenance-modal')">🔧 Registrar Manutenção</button>
+        <button type="button" class="quick-btn" onclick="App.openVehicleModal()">🚗 + Novo Veículo</button>
+      </div>
+
+      <!-- Dashboard Alerts (CNH e Manutenção) -->
+      <div id="dash-alerts" class="dash-alerts" style="display:none;"></div>
+
       <div class="kpi-grid">
         <div class="kpi-card info">
           <div class="kpi-icon">🚗</div>
@@ -168,8 +179,8 @@
         <div class="card-header"><h3>⛽ Histórico de Abastecimentos</h3></div>
         <div class="card-body table-responsive">
           <table class="data-table">
-            <thead><tr><th>Data</th><th>Placa</th><th>Motorista</th><th>Litros</th><th>Valor</th><th>KM</th><th>Ações</th></tr></thead>
-            <tbody id="fueling-table"><tr><td colspan="7" class="empty-state"><div class="empty-icon">⛽</div><h4>Carregando...</h4></td></tr></tbody>
+            <thead><tr><th>Data</th><th>Placa</th><th>Motorista</th><th>Litros</th><th>Valor</th><th>Preço/L</th><th>KM</th><th>Posto</th><th>Ações</th></tr></thead>
+            <tbody id="fueling-table"><tr><td colspan="9" class="empty-state"><div class="empty-icon">⛽</div><h4>Carregando...</h4></td></tr></tbody>
           </table>
         </div>
       </div>
@@ -184,8 +195,8 @@
         <div class="card-header"><h3>🔧 Histórico de Manutenções</h3></div>
         <div class="card-body table-responsive">
           <table class="data-table">
-            <thead><tr><th>Data</th><th>Placa</th><th>Tipo</th><th>Descrição</th><th>Custo</th><th>Status</th><th>Ações</th></tr></thead>
-            <tbody id="maintenance-table"><tr><td colspan="7" class="empty-state"><div class="empty-icon">🔧</div><h4>Carregando...</h4></td></tr></tbody>
+            <thead><tr><th>Data</th><th>Placa</th><th>Tipo</th><th>Descrição</th><th>Custo</th><th>Status</th><th>Oficina</th><th>Ações</th></tr></thead>
+            <tbody id="maintenance-table"><tr><td colspan="8" class="empty-state"><div class="empty-icon">🔧</div><h4>Carregando...</h4></td></tr></tbody>
           </table>
         </div>
       </div>
@@ -200,8 +211,8 @@
         <div class="card-header"><h3>📍 Registros de Quilometragem</h3></div>
         <div class="card-body table-responsive">
           <table class="data-table">
-            <thead><tr><th>Data</th><th>Placa</th><th>KM Anterior</th><th>KM Atual</th><th>Diferença</th><th>Motorista</th></tr></thead>
-            <tbody id="km-table"><tr><td colspan="6" class="empty-state"><div class="empty-icon">📍</div><h4>Carregando...</h4></td></tr></tbody>
+            <thead><tr><th>Data</th><th>Placa</th><th>KM Anterior</th><th>KM Atual</th><th>Diferença</th><th>Motorista</th><th>Observação</th><th>Ações</th></tr></thead>
+            <tbody id="km-table"><tr><td colspan="8" class="empty-state"><div class="empty-icon">📍</div><h4>Carregando...</h4></td></tr></tbody>
           </table>
         </div>
       </div>
@@ -243,9 +254,10 @@
           <label>Grupo</label>
           <select id="r-grupo" class="form-control"><option value="">Todos</option><option value="S2">S2</option><option value="S3">S3</option><option value="S4">S4</option></select>
         </div>
-        <div style="display:flex;align-items:flex-end;gap:8px;margin-left:auto;">
+        <div style="display:flex;align-items:flex-end;gap:8px;margin-left:auto;flex-wrap:wrap;">
           <button type="button" class="btn btn-primary" onclick="App.gerarRelatorio()">📊 Gerar Relatório</button>
-          <button type="button" class="btn btn-secondary" onclick="App.exportarExcel()">📥 Excel</button>
+          <button type="button" class="btn btn-secondary" onclick="App.exportarExcel()">📥 Excel (CSV)</button>
+          <button type="button" class="btn btn-secondary" onclick="App.imprimirRelatorio()">🖨️ Imprimir / PDF</button>
         </div>
       </div>
 
@@ -272,12 +284,25 @@
           <span id="report-count" style="font-size:12px;color:var(--text-muted);"></span>
         </div>
         <div class="card-body">
+          <div class="print-header" id="print-header" style="display:none;">
+            <h2>GOVERNO DO ESTADO DE SÃO PAULO — COMPLEXO PENAL DE MARÍLIA</h2>
+            <h3>SETOR DE TRANSPORTES E GESTÃO DE FROTAS</h3>
+            <p id="print-subtitle" style="margin-top:6px;font-weight:600;"></p>
+            <p id="print-meta" style="font-size:11px;color:#555;"></p>
+          </div>
+
           <div class="table-responsive" id="report-table-container">
             <table class="data-table" id="report-table">
               <thead id="report-thead"></thead>
               <tbody id="report-tbody"></tbody>
             </table>
           </div>
+
+          <div class="print-footer" id="print-footer" style="display:none;">
+            <div class="print-sign-line">Responsável pelo Setor de Transportes<br><small>Assinatura e Carimbo</small></div>
+            <div class="print-sign-line">Condutor / Motorista<br><small>Assinatura</small></div>
+          </div>
+
           <div id="report-graficos" style="display:none;">
             <div class="dashboard-grid">
               <div class="card">
@@ -385,17 +410,19 @@
 <!-- Modal Abastecimento -->
 <div class="modal-overlay" id="fueling-modal">
   <div class="modal">
-    <div class="modal-header"><h3>Registrar Abastecimento</h3><button type="button" class="modal-close" onclick="App.closeModal('fueling-modal')">&times;</button></div>
+    <div class="modal-header"><h3 id="fueling-modal-title">Registrar Abastecimento</h3><button type="button" class="modal-close" onclick="App.closeModal('fueling-modal')">&times;</button></div>
     <div class="modal-body">
       <form id="fueling-form" onsubmit="return false;">
+        <input type="hidden" name="id" id="f-id">
         <div class="form-row">
           <div class="form-group"><label>Data</label><input type="date" name="data" id="f-data" class="form-control" required></div>
           <div class="form-group"><label>Placa</label><select name="placa" id="f-placa" class="form-control" required><option value="">Selecione a placa</option></select></div>
           <div class="form-group"><label>Motorista</label><select name="motorista" id="f-motorista" class="form-control"><option value="">Selecione o motorista</option></select></div>
           <div class="form-group"><label>Litros</label><input type="number" step="0.01" name="litros" id="f-litros" class="form-control" placeholder="0.00" required></div>
-          <div class="form-group"><label>Valor (R$)</label><input type="number" step="0.01" name="valor" id="f-valor" class="form-control" placeholder="0.00" required></div>
+          <div class="form-group"><label>Valor Total (R$)</label><input type="number" step="0.01" name="valor" id="f-valor" class="form-control" placeholder="0.00" required></div>
+          <div class="form-group"><label>Preço / Litro</label><input type="text" id="f-preco-litro" class="form-control" placeholder="Calculado auto" readonly style="opacity:0.85;background:var(--bg-card-hover);"></div>
           <div class="form-group"><label>KM Atual</label><input type="number" name="km" id="f-km" class="form-control" placeholder="0" required></div>
-          <div class="form-group"><label>Posto</label><input type="text" name="posto" id="f-posto" class="form-control" placeholder="Nome do posto"></div>
+          <div class="form-group"><label>Posto de Combustível</label><input type="text" name="posto" id="f-posto" class="form-control" placeholder="Nome do posto"></div>
         </div>
       </form>
     </div>
@@ -409,9 +436,10 @@
 <!-- Modal Manutenção -->
 <div class="modal-overlay" id="maintenance-modal">
   <div class="modal">
-    <div class="modal-header"><h3>Registrar Manutenção</h3><button type="button" class="modal-close" onclick="App.closeModal('maintenance-modal')">&times;</button></div>
+    <div class="modal-header"><h3 id="maintenance-modal-title">Registrar Manutenção</h3><button type="button" class="modal-close" onclick="App.closeModal('maintenance-modal')">&times;</button></div>
     <div class="modal-body">
       <form id="maintenance-form" onsubmit="return false;">
+        <input type="hidden" name="id" id="m-id">
         <div class="form-row">
           <div class="form-group"><label>Data</label><input type="date" name="data" id="m-data" class="form-control" required></div>
           <div class="form-group"><label>Placa</label><select name="placa" id="m-placa" class="form-control" required><option value="">Selecione a placa</option></select></div>
@@ -419,14 +447,17 @@
             <select name="tipo" id="m-tipo" class="form-control">
               <option value="Preventiva">Preventiva</option>
               <option value="Corretiva">Corretiva</option>
-              <option value="Revisão">Revisão</option>
-              <option value="Pneus">Pneus</option>
+              <option value="Revisão Periódica">Revisão Periódica</option>
+              <option value="Troca de Óleo / Filtros">Troca de Óleo / Filtros</option>
+              <option value="Pneus / Alinhamento">Pneus / Alinhamento</option>
+              <option value="Freios / Suspensão">Freios / Suspensão</option>
+              <option value="Funilaria / Pintura">Funilaria / Pintura</option>
               <option value="Outro">Outro</option>
             </select>
           </div>
-          <div class="form-group"><label>Descrição</label><input type="text" name="descricao" id="m-descricao" class="form-control" placeholder="Descrição do serviço"></div>
-          <div class="form-group"><label>Custo (R$)</label><input type="number" step="0.01" name="custo" id="m-custo" class="form-control" placeholder="0.00" required></div>
-          <div class="form-group"><label>Oficina</label><input type="text" name="oficina" id="m-oficina" class="form-control" placeholder="Nome da oficina"></div>
+          <div class="form-group"><label>Descrição do Serviço</label><input type="text" name="descricao" id="m-descricao" class="form-control" placeholder="Descrição detalhada"></div>
+          <div class="form-group"><label>Custo Total (R$)</label><input type="number" step="0.01" name="custo" id="m-custo" class="form-control" placeholder="0.00" required></div>
+          <div class="form-group"><label>Oficina / Fornecedor</label><input type="text" name="oficina" id="m-oficina" class="form-control" placeholder="Nome da oficina"></div>
           <div class="form-group"><label>Status</label>
             <select name="status" id="m-status" class="form-control">
               <option value="Em Andamento">Em Andamento</option>
@@ -447,11 +478,12 @@
 <!-- Modal Motorista -->
 <div class="modal-overlay" id="driver-modal">
   <div class="modal">
-    <div class="modal-header"><h3>Novo Motorista</h3><button type="button" class="modal-close" onclick="App.closeModal('driver-modal')">&times;</button></div>
+    <div class="modal-header"><h3 id="driver-modal-title">Novo Motorista</h3><button type="button" class="modal-close" onclick="App.closeModal('driver-modal')">&times;</button></div>
     <div class="modal-body">
       <form id="driver-form" onsubmit="return false;">
+        <input type="hidden" name="id" id="d-id">
         <div class="form-row">
-          <div class="form-group"><label>Nome</label><input type="text" name="nome" id="d-nome" class="form-control" placeholder="Nome completo" required></div>
+          <div class="form-group"><label>Nome Completo</label><input type="text" name="nome" id="d-nome" class="form-control" placeholder="Nome completo" required></div>
           <div class="form-group"><label>CPF</label><input type="text" name="cpf" id="d-cpf" class="form-control" placeholder="000.000.000-00" required></div>
           <div class="form-group"><label>CNH</label><input type="text" name="cnh" id="d-cnh" class="form-control" placeholder="Número da CNH" required></div>
           <div class="form-group"><label>Venc. CNH</label><input type="date" name="cnh_vencimento" id="d-cnh-vencimento" class="form-control"></div>
@@ -489,16 +521,18 @@
 <!-- Modal KM -->
 <div class="modal-overlay" id="km-modal">
   <div class="modal">
-    <div class="modal-header"><h3>Registrar Quilometragem</h3><button type="button" class="modal-close" onclick="App.closeModal('km-modal')">&times;</button></div>
+    <div class="modal-header"><h3 id="km-modal-title">Registrar Quilometragem / Viagem</h3><button type="button" class="modal-close" onclick="App.closeModal('km-modal')">&times;</button></div>
     <div class="modal-body">
       <form id="km-form" onsubmit="return false;">
+        <input type="hidden" name="id" id="k-id">
         <div class="form-row">
           <div class="form-group"><label>Data</label><input type="date" name="data" id="k-data" class="form-control" required></div>
           <div class="form-group"><label>Placa</label><select name="placa" id="k-placa" class="form-control" required><option value="">Selecione a placa</option></select></div>
-          <div class="form-group"><label>KM Anterior</label><input type="number" name="kmAnterior" id="k-kmAnterior" class="form-control" placeholder="0" required></div>
-          <div class="form-group"><label>KM Atual</label><input type="number" name="kmAtual" id="k-kmAtual" class="form-control" placeholder="0" required></div>
           <div class="form-group"><label>Motorista</label><select name="motorista" id="k-motorista" class="form-control"><option value="">Selecione o motorista</option></select></div>
-          <div class="form-group"><label>Observação</label><input type="text" name="observacao" id="k-observacao" class="form-control" placeholder="Observação"></div>
+          <div class="form-group"><label>KM Anterior (Saída)</label><input type="number" name="kmAnterior" id="k-kmAnterior" class="form-control" placeholder="0" required></div>
+          <div class="form-group"><label>KM Atual (Retorno)</label><input type="number" name="kmAtual" id="k-kmAtual" class="form-control" placeholder="0" required></div>
+          <div class="form-group"><label>Distância Rodada</label><input type="text" id="k-km-dif" class="form-control" placeholder="0 km" readonly style="opacity:0.85;background:var(--bg-card-hover);"></div>
+          <div class="form-group" style="grid-column:1 / -1;"><label>Destino / Motivo / Observação</label><input type="text" name="observacao" id="k-observacao" class="form-control" placeholder="Ex: Escolta para audiência, Transporte de servidores, Manutenção..."></div>
         </div>
       </form>
     </div>
@@ -545,6 +579,7 @@
   </div>
 </div>
 
+<div id="toast-container" class="toast-container"></div>
 <script src="js/config.js"></script>
 <script src="js/app.js"></script>
 </body>
