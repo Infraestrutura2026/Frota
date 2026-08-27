@@ -1,11 +1,12 @@
 // ==========================================
-// FROTA PRO v3.0 — Sistema de Gestão de Frotas
+// FROTA PRO v3.1 — Sistema de Gestão de Frotas
 // Complexo Penal de Marília
-// Lógica Completa: Modo Online (Supabase) + Fallback Local Robusto
+// Suporte Multi-computador: Servidor Central Online + Nuvem Supabase + Fallback Local
 // ==========================================
 
 const App = (function() {
   let token = localStorage.getItem('frota_token');
+  let backendMode = 'server'; // 'server' | 'supabase' | 'local'
   let isOnline = false;
   let vehicles = [];
   let fueling = [];
@@ -77,6 +78,60 @@ const App = (function() {
   }
 
   // ========================
+  // UNIFIED DATA ACCESS LAYER (SERVIDOR NODE OU SUPABASE OU LOCAL)
+  // ========================
+  async function dataInsert(table, obj) {
+    if (backendMode === 'server') {
+      try {
+        const res = await fetch('/api/' + table, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(obj)
+        });
+        if (res.ok) return await res.json();
+      } catch (e) {
+        console.warn('API insert error:', e);
+      }
+    } else if (backendMode === 'supabase' && CONFIG.isConfigured) {
+      return await sbInsert(table, obj);
+    }
+    return null;
+  }
+
+  async function dataUpdate(table, id, obj) {
+    if (backendMode === 'server') {
+      try {
+        const res = await fetch(`/api/${table}/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(obj)
+        });
+        if (res.ok) return await res.json();
+      } catch (e) {
+        console.warn('API update error:', e);
+      }
+    } else if (backendMode === 'supabase' && CONFIG.isConfigured) {
+      return await sbUpdate(table, id, obj);
+    }
+    return null;
+  }
+
+  async function dataDelete(table, id) {
+    if (backendMode === 'server') {
+      try {
+        const res = await fetch(`/api/${table}/${id}`, { method: 'DELETE' });
+        return res.ok;
+      } catch (e) {
+        console.warn('API delete error:', e);
+        return false;
+      }
+    } else if (backendMode === 'supabase' && CONFIG.isConfigured) {
+      return await sbDelete(table, id);
+    }
+    return true;
+  }
+
+  // ========================
   // SUPABASE API REST HELPERS
   // ========================
   async function sbRequest(table, method, body, id) {
@@ -90,18 +145,13 @@ const App = (function() {
     };
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
       const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: controller.signal });
       clearTimeout(timeoutId);
-      if (!res.ok) {
-        const errText = await res.text().catch(() => res.statusText);
-        console.warn('Supabase error:', res.status, errText);
-        return null;
-      }
+      if (!res.ok) return null;
       if (method === 'DELETE') return true;
       return await res.json();
     } catch (e) {
-      console.warn('Supabase request error:', e.message);
       return null;
     }
   }
@@ -135,16 +185,12 @@ const App = (function() {
   function loadLocal() {
     const storedV = localStorage.getItem('frota_vehicles');
     if (storedV) {
-      try {
-        vehicles = JSON.parse(storedV);
-      } catch (e) { vehicles = []; }
+      try { vehicles = JSON.parse(storedV); } catch (e) { vehicles = []; }
     }
-    // Se não houver veículos cadastrados, inicializa automaticamente com os 29 veículos de Marília
     if (!vehicles || vehicles.length === 0) {
       vehicles = IMPORT_DATA.map((v, idx) => ({ ...v, id: idx + 1 }));
       localStorage.setItem('frota_vehicles', JSON.stringify(vehicles));
     }
-
     try { fueling = JSON.parse(localStorage.getItem('frota_fueling') || '[]'); } catch (e) { fueling = []; }
     try { maintenance = JSON.parse(localStorage.getItem('frota_maintenance') || '[]'); } catch (e) { maintenance = []; }
     try { km = JSON.parse(localStorage.getItem('frota_km') || '[]'); } catch (e) { km = []; }
@@ -174,13 +220,8 @@ const App = (function() {
   }
 
   function loadUsers() {
-    try {
-      users = JSON.parse(localStorage.getItem('frota_users') || '[]');
-    } catch (e) { users = []; }
-
+    try { users = JSON.parse(localStorage.getItem('frota_users') || '[]'); } catch (e) { users = []; }
     if (users.length === 0) {
-      // Usuário administrador padrão: admin / admin2025
-      // sha256('admin2025') = e6c2797fed87dd7a39f60bcfe65cf34645229671607ef506720d20d41f173b2a
       users.push({
         id: 1,
         nome: 'Administrador da Frota',
@@ -225,6 +266,7 @@ const App = (function() {
     }
 
     bindEvents();
+    startPolling();
   }
 
   function bindEvents() {
@@ -250,8 +292,7 @@ const App = (function() {
     const btnImport = document.getElementById('btn-import');
     if (btnImport) btnImport.addEventListener('click', doImport);
 
-    // Eventos inteligentes para auto-preenchimento
-    // 1. Placa em KM -> preenche KM Anterior com o odômetro atual do veículo
+    // Auto-preenchimento
     const kPlaca = document.getElementById('k-placa');
     if (kPlaca) {
       kPlaca.addEventListener('change', function() {
@@ -264,13 +305,11 @@ const App = (function() {
       });
     }
 
-    // 2. KM Atual / KM Anterior -> calcula automaticamente a distância rodada
     const kAnt = document.getElementById('k-kmAnterior');
     const kAtu = document.getElementById('k-kmAtual');
     if (kAnt) kAnt.addEventListener('input', updateKmDif);
     if (kAtu) kAtu.addEventListener('input', updateKmDif);
 
-    // 3. Placa em Abastecimento -> sugere KM atual do veículo
     const fPlaca = document.getElementById('f-placa');
     if (fPlaca) {
       fPlaca.addEventListener('change', function() {
@@ -282,13 +321,11 @@ const App = (function() {
       });
     }
 
-    // 4. Litros / Valor -> calcula preço por litro
     const fLitros = document.getElementById('f-litros');
     const fValor = document.getElementById('f-valor');
     if (fLitros) fLitros.addEventListener('input', updatePrecoLitro);
     if (fValor) fValor.addEventListener('input', updatePrecoLitro);
 
-    // Enter no form de login
     const loginPass = document.getElementById('login-pass');
     if (loginPass) {
       loginPass.addEventListener('keydown', (e) => {
@@ -356,7 +393,6 @@ const App = (function() {
       return;
     }
 
-    // Fallback legado config.js
     if (u === CONFIG.LOCAL_USER && p === CONFIG.LOCAL_PASS) {
       token = 'token_local_' + Date.now();
       currentUser = { id: 1, nome: 'Administrador (Local)', usuario: u, role: 'admin' };
@@ -406,18 +442,25 @@ const App = (function() {
     if (navUsers) navUsers.style.display = isAdmin ? 'flex' : 'none';
   }
 
-  function updateModeBadge(online) {
+  function updateModeBadge(mode) {
     const badge = document.getElementById('mode-badge');
     if (!badge) return;
     badge.style.display = 'inline-block';
-    if (online) {
-      badge.textContent = '☁️ Modo Online (Supabase)';
+    if (mode === 'server') {
+      badge.textContent = '🌐 Online (Rede / Servidor Central)';
       badge.style.background = 'var(--success)';
       badge.style.color = '#fff';
+      badge.title = 'Conectado ao Servidor Central. Todos os computadores compartilham os mesmos dados em tempo real!';
+    } else if (mode === 'supabase') {
+      badge.textContent = '☁️ Online (Nuvem Supabase)';
+      badge.style.background = 'var(--info)';
+      badge.style.color = '#fff';
+      badge.title = 'Conectado ao banco de dados Supabase na nuvem.';
     } else {
-      badge.textContent = '📴 Modo Local (Offline)';
+      badge.textContent = '📴 Modo Local';
       badge.style.background = 'var(--warning)';
       badge.style.color = '#000';
+      badge.title = 'Dados salvos localmente neste navegador.';
     }
   }
 
@@ -459,65 +502,124 @@ const App = (function() {
     if (page === 'reports') { initReports(); gerarRelatorio(); }
     if (page === 'users') renderUsers();
 
-    // Fecha sidebar no mobile ao clicar em um link
     if (window.innerWidth <= 768) {
       document.getElementById('sidebar').classList.remove('open');
     }
   }
 
   // ========================
-  // CARREGAMENTO DE DADOS (ONLINE + FALLBACK LOCAL)
+  // CARREGAMENTO DE DADOS (SERVIDOR NODE -> SUPABASE -> LOCAL)
   // ========================
   async function loadData() {
-    // Carrega sempre os dados locais primeiro para navegação instantânea sem tela branca
     loadLocal();
     populateVehicleSelects();
     populateDriverSelects();
     renderDashboard();
     renderAlerts();
 
-    if (!CONFIG.isConfigured) {
-      isOnline = false;
-      updateModeBadge(false);
-      return;
-    }
-
+    // 1. Tenta carregar do Servidor Central Node.js (/api/status e /api/data)
     try {
-      const v = await sbGet('vehicles');
-      if (v !== null && Array.isArray(v)) {
-        if (v.length > 0) {
-          vehicles = v;
-        } else if (vehicles.length > 0) {
-          // Supabase vazio, sincroniza os veículos locais com a nuvem
-          for (const item of vehicles) {
-            await sbInsert('vehicles', item);
+      const sRes = await fetch('/api/status', { method: 'GET' });
+      if (sRes.ok) {
+        const st = await sRes.json();
+        if (st && st.online) {
+          const dRes = await fetch('/api/data', { method: 'GET' });
+          if (dRes.ok) {
+            const data = await dRes.json();
+            backendMode = 'server';
+            isOnline = true;
+            vehicles = data.vehicles || [];
+            fueling = data.fueling || [];
+            maintenance = data.maintenance || [];
+            km = data.km_records || [];
+            drivers = data.drivers || [];
+            if (data.users && data.users.length > 0) {
+              users = data.users;
+              saveUsers();
+            }
+            saveLocal();
+            updateModeBadge('server');
+            populateVehicleSelects();
+            populateDriverSelects();
+            renderDashboard();
+            renderAlerts();
+            return;
           }
         }
-        const f = await sbGet('fueling');
-        const m = await sbGet('maintenance');
-        const k = await sbGet('km_records');
-        const d = await sbGet('drivers');
-        if (f !== null) fueling = f;
-        if (m !== null) maintenance = m;
-        if (k !== null) km = k;
-        if (d !== null) drivers = d;
-
-        isOnline = true;
-        updateModeBadge(true);
-        saveLocal();
-        populateVehicleSelects();
-        populateDriverSelects();
-        renderDashboard();
-        renderAlerts();
-      } else {
-        isOnline = false;
-        updateModeBadge(false);
       }
     } catch (e) {
-      isOnline = false;
-      updateModeBadge(false);
-      console.warn('Conexão remota indisponível. Operando normalmente em Modo Local.');
+      // Servidor local não disponível (ex: hospedagem puramente estática)
     }
+
+    // 2. Tenta carregar do Supabase (se configurado)
+    const customUrl = localStorage.getItem('frota_custom_supabase_url');
+    const customKey = localStorage.getItem('frota_custom_supabase_key');
+    if (customUrl) CONFIG.SUPABASE_URL = customUrl;
+    if (customKey) CONFIG.SUPABASE_KEY = customKey;
+
+    if (CONFIG.isConfigured) {
+      try {
+        const v = await sbGet('vehicles');
+        if (v !== null && Array.isArray(v)) {
+          backendMode = 'supabase';
+          isOnline = true;
+          if (v.length > 0) vehicles = v;
+          const f = await sbGet('fueling');
+          const m = await sbGet('maintenance');
+          const k = await sbGet('km_records');
+          const d = await sbGet('drivers');
+          if (f !== null) fueling = f;
+          if (m !== null) maintenance = m;
+          if (k !== null) km = k;
+          if (d !== null) drivers = d;
+          saveLocal();
+          updateModeBadge('supabase');
+          populateVehicleSelects();
+          populateDriverSelects();
+          renderDashboard();
+          renderAlerts();
+          return;
+        }
+      } catch (e) {
+        console.warn('Supabase não conectado:', e);
+      }
+    }
+
+    // 3. Fallback para Modo Local
+    backendMode = 'local';
+    isOnline = false;
+    updateModeBadge('local');
+  }
+
+  // Polling em background para sincronização em tempo real entre múltiplos computadores
+  function startPolling() {
+    setInterval(async () => {
+      if (backendMode === 'server' && !document.querySelector('.modal-overlay.active')) {
+        try {
+          const res = await fetch('/api/data', { method: 'GET' });
+          if (res.ok) {
+            const fresh = await res.json();
+            vehicles = fresh.vehicles || vehicles;
+            fueling = fresh.fueling || fueling;
+            maintenance = fresh.maintenance || maintenance;
+            km = fresh.km_records || km;
+            drivers = fresh.drivers || drivers;
+            saveLocal();
+
+            const curPage = document.querySelector('.page-section.active');
+            if (curPage) {
+              const pageId = curPage.id.replace('page-', '');
+              if (pageId === 'dashboard') { renderDashboard(); renderAlerts(); }
+              else if (pageId === 'vehicles') renderVehicles();
+              else if (pageId === 'fueling') renderFueling();
+              else if (pageId === 'maintenance') renderMaintenance();
+              else if (pageId === 'km') renderKm();
+              else if (pageId === 'drivers') renderDrivers();
+            }
+          }
+        } catch (e) {}
+      }
+    }, 15000);
   }
 
   // ========================
@@ -531,7 +633,6 @@ const App = (function() {
       const current = sel.value;
       const isReport = (id === 'r-placa');
       sel.innerHTML = isReport ? '<option value="">Todas as Placas</option>' : '<option value="">Selecione a placa...</option>';
-      
       const sorted = [...vehicles].sort((a, b) => (a.placa || '').localeCompare(b.placa || ''));
       sorted.forEach(v => {
         const opt = document.createElement('option');
@@ -597,7 +698,6 @@ const App = (function() {
     document.getElementById('kpi-km-month').textContent = kmMonth.toLocaleString('pt-BR') + ' km';
     document.getElementById('kpi-drivers').textContent = drivers.length;
 
-    // Lista de recentes
     const recentFuelEl = document.getElementById('recent-fuel');
     if (recentFuelEl) {
       recentFuelEl.innerHTML = fueling.slice(-5).reverse().map(f => `
@@ -634,12 +734,10 @@ const App = (function() {
   function renderAlerts() {
     const banner = document.getElementById('dash-alerts');
     if (!banner) return;
-
     const alerts = [];
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
 
-    // 1. Alertas de CNH
     let cnhVencidas = 0;
     let cnhVencendo = 0;
     drivers.forEach(d => {
@@ -667,7 +765,6 @@ const App = (function() {
       });
     }
 
-    // 2. Veículos em Manutenção
     const emManutencao = vehicles.filter(v => (v.status || '').toUpperCase() === 'MANUTENÇÃO').length;
     if (emManutencao > 0) {
       alerts.push({
@@ -756,25 +853,17 @@ const App = (function() {
     data.capacidade = parseInt(data.capacidade) || null;
     data.status = (data.status || 'ATIVO').toUpperCase();
 
-    // Verificação de placa duplicada
     const dup = vehicles.find(x => x.placa === data.placa && x.id !== editingVehicle);
     if (dup) return alert(`Já existe outro veículo cadastrado com a placa ${data.placa}.`);
 
-    if (isOnline && CONFIG.isConfigured) {
-      if (editingVehicle) {
-        const res = await sbUpdate('vehicles', editingVehicle, data);
-        if (!res) { alert('Erro ao salvar no Supabase. Salvando localmente.'); }
-      } else {
-        const res = await sbInsert('vehicles', data);
-        if (res && res[0]) data.id = res[0].id;
-      }
-    }
-
     if (editingVehicle) {
+      await dataUpdate('vehicles', editingVehicle, data);
       const idx = vehicles.findIndex(v => v.id === editingVehicle);
       if (idx >= 0) vehicles[idx] = { ...vehicles[idx], ...data };
     } else {
-      data.id = data.id || Date.now();
+      const res = await dataInsert('vehicles', data);
+      if (res && res.id) data.id = res.id;
+      else data.id = data.id || Date.now();
       vehicles.push(data);
     }
 
@@ -792,9 +881,7 @@ const App = (function() {
     const v = vehicles.find(x => x.id === id);
     if (!confirm(`Deseja realmente excluir o veículo ${v ? v.placa : ''}?`)) return;
 
-    if (isOnline && CONFIG.isConfigured) {
-      await sbDelete('vehicles', id);
-    }
+    await dataDelete('vehicles', id);
     vehicles = vehicles.filter(x => x.id !== id);
     saveLocal();
     populateVehicleSelects();
@@ -805,7 +892,7 @@ const App = (function() {
   }
 
   // ========================
-  // MÓDULO: ABASTECIMENTO (CRUD COMPLETO COM AUTO-HODÔMETRO)
+  // MÓDULO: ABASTECIMENTO (CRUD COMPLETO)
   // ========================
   function renderFueling() {
     const tbody = document.getElementById('fueling-table');
@@ -850,29 +937,21 @@ const App = (function() {
     data.valor = parseFloat(data.valor);
     data.km = parseInt(data.km) || 0;
 
-    // Atualização automática do hodômetro do veículo caso o KM informado seja superior
+    // Atualização automática do odômetro do veículo no servidor e na tela
     const vIndex = vehicles.findIndex(v => v.placa === data.placa);
     if (vIndex >= 0 && data.km > (vehicles[vIndex].hodometro || 0)) {
       vehicles[vIndex].hodometro = data.km;
-      if (isOnline && CONFIG.isConfigured) {
-        sbUpdate('vehicles', vehicles[vIndex].id, { hodometro: data.km });
-      }
-    }
-
-    if (isOnline && CONFIG.isConfigured) {
-      if (editingFueling) {
-        await sbUpdate('fueling', editingFueling, data);
-      } else {
-        const res = await sbInsert('fueling', data);
-        if (res && res[0]) data.id = res[0].id;
-      }
+      dataUpdate('vehicles', vehicles[vIndex].id, { hodometro: data.km });
     }
 
     if (editingFueling) {
+      await dataUpdate('fueling', editingFueling, data);
       const idx = fueling.findIndex(x => x.id === editingFueling);
       if (idx >= 0) fueling[idx] = { ...fueling[idx], ...data };
     } else {
-      data.id = data.id || Date.now();
+      const res = await dataInsert('fueling', data);
+      if (res && res.id) data.id = res.id;
+      else data.id = data.id || Date.now();
       fueling.push(data);
     }
 
@@ -888,9 +967,7 @@ const App = (function() {
     if (!requireAdmin()) return alert('Apenas administradores podem excluir lançamentos.');
     if (!confirm('Deseja excluir este registro de abastecimento?')) return;
 
-    if (isOnline && CONFIG.isConfigured) {
-      await sbDelete('fueling', id);
-    }
+    await dataDelete('fueling', id);
     fueling = fueling.filter(x => x.id !== id);
     saveLocal();
     renderFueling();
@@ -936,36 +1013,28 @@ const App = (function() {
     if (!data.placa || data.custo === '') return alert('Preencha a placa e o custo.');
     data.custo = parseFloat(data.custo) || 0;
 
-    // Se a manutenção for aberta (Em Andamento), sugere mudar status do veículo para MANUTENÇÃO
     if (data.status === 'Em Andamento') {
       const v = vehicles.find(x => x.placa === data.placa);
       if (v && v.status !== 'MANUTENÇÃO') {
         v.status = 'MANUTENÇÃO';
-        if (isOnline && CONFIG.isConfigured) sbUpdate('vehicles', v.id, { status: 'MANUTENÇÃO' });
+        dataUpdate('vehicles', v.id, { status: 'MANUTENÇÃO' });
       }
     } else if (data.status === 'Concluído') {
-      // Se concluiu a manutenção, podemos retornar o veículo para ATIVO caso esteja em MANUTENÇÃO
       const v = vehicles.find(x => x.placa === data.placa);
       if (v && v.status === 'MANUTENÇÃO') {
         v.status = 'ATIVO';
-        if (isOnline && CONFIG.isConfigured) sbUpdate('vehicles', v.id, { status: 'ATIVO' });
-      }
-    }
-
-    if (isOnline && CONFIG.isConfigured) {
-      if (editingMaintenance) {
-        await sbUpdate('maintenance', editingMaintenance, data);
-      } else {
-        const res = await sbInsert('maintenance', data);
-        if (res && res[0]) data.id = res[0].id;
+        dataUpdate('vehicles', v.id, { status: 'ATIVO' });
       }
     }
 
     if (editingMaintenance) {
+      await dataUpdate('maintenance', editingMaintenance, data);
       const idx = maintenance.findIndex(x => x.id === editingMaintenance);
       if (idx >= 0) maintenance[idx] = { ...maintenance[idx], ...data };
     } else {
-      data.id = data.id || Date.now();
+      const res = await dataInsert('maintenance', data);
+      if (res && res.id) data.id = res.id;
+      else data.id = data.id || Date.now();
       maintenance.push(data);
     }
 
@@ -982,9 +1051,7 @@ const App = (function() {
     if (!requireAdmin()) return alert('Apenas administradores podem excluir registros.');
     if (!confirm('Deseja excluir esta manutenção?')) return;
 
-    if (isOnline && CONFIG.isConfigured) {
-      await sbDelete('maintenance', id);
-    }
+    await dataDelete('maintenance', id);
     maintenance = maintenance.filter(x => x.id !== id);
     saveLocal();
     renderMaintenance();
@@ -994,7 +1061,7 @@ const App = (function() {
   }
 
   // ========================
-  // MÓDULO: QUILOMETRAGEM / VIAGENS (CRUD COMPLETO COM AUTO-HODÔMETRO)
+  // MÓDULO: QUILOMETRAGEM / VIAGENS
   // ========================
   function renderKm() {
     const tbody = document.getElementById('km-table');
@@ -1055,29 +1122,20 @@ const App = (function() {
       observacao: data.observacao
     };
 
-    // Atualização automática do odômetro do veículo no cadastro
     const vIndex = vehicles.findIndex(v => v.placa === payload.placa);
     if (vIndex >= 0 && kmAtu > (vehicles[vIndex].hodometro || 0)) {
       vehicles[vIndex].hodometro = kmAtu;
-      if (isOnline && CONFIG.isConfigured) {
-        sbUpdate('vehicles', vehicles[vIndex].id, { hodometro: kmAtu });
-      }
-    }
-
-    if (isOnline && CONFIG.isConfigured) {
-      if (editingKm) {
-        await sbUpdate('km_records', editingKm, payload);
-      } else {
-        const res = await sbInsert('km_records', payload);
-        if (res && res[0]) payload.id = res[0].id;
-      }
+      dataUpdate('vehicles', vehicles[vIndex].id, { hodometro: kmAtu });
     }
 
     if (editingKm) {
+      await dataUpdate('km_records', editingKm, payload);
       const idx = km.findIndex(x => x.id === editingKm);
       if (idx >= 0) km[idx] = { ...km[idx], ...payload };
     } else {
-      payload.id = payload.id || Date.now();
+      const res = await dataInsert('km_records', payload);
+      if (res && res.id) payload.id = res.id;
+      else payload.id = payload.id || Date.now();
       km.push(payload);
     }
 
@@ -1093,9 +1151,7 @@ const App = (function() {
     if (!requireAdmin()) return alert('Apenas administradores podem excluir registros.');
     if (!confirm('Deseja excluir este registro de quilometragem?')) return;
 
-    if (isOnline && CONFIG.isConfigured) {
-      await sbDelete('km_records', id);
-    }
+    await dataDelete('km_records', id);
     km = km.filter(x => x.id !== id);
     saveLocal();
     renderKm();
@@ -1104,7 +1160,7 @@ const App = (function() {
   }
 
   // ========================
-  // MÓDULO: MOTORISTAS (COM VALIDAÇÃO FLEXÍVEL DE CNH)
+  // MÓDULO: MOTORISTAS
   // ========================
   function renderDrivers() {
     const tbody = document.getElementById('drivers-table');
@@ -1156,7 +1212,6 @@ const App = (function() {
     const data = formToObj('driver-form');
     if (!data.nome) return alert('O nome do motorista é obrigatório.');
 
-    // Tratamento e validação flexível de CNH
     let cnhVencidaAviso = false;
     if (data.cnh_vencimento) {
       if (data.cnh_vencimento.includes('/')) {
@@ -1166,27 +1221,19 @@ const App = (function() {
       const hoje = new Date();
       hoje.setHours(0, 0, 0, 0);
       const venc = new Date(data.cnh_vencimento + 'T00:00:00');
-      if (venc < hoje) {
-        cnhVencidaAviso = true;
-      }
+      if (venc < hoje) cnhVencidaAviso = true;
     } else {
       data.cnh_vencimento = null;
     }
 
-    if (isOnline && CONFIG.isConfigured) {
-      if (editingDriver) {
-        await sbUpdate('drivers', editingDriver, data);
-      } else {
-        const res = await sbInsert('drivers', data);
-        if (res && res[0]) data.id = res[0].id;
-      }
-    }
-
     if (editingDriver) {
+      await dataUpdate('drivers', editingDriver, data);
       const idx = drivers.findIndex(d => d.id === editingDriver);
       if (idx >= 0) drivers[idx] = { ...drivers[idx], ...data };
     } else {
-      data.id = data.id || Date.now();
+      const res = await dataInsert('drivers', data);
+      if (res && res.id) data.id = res.id;
+      else data.id = data.id || Date.now();
       drivers.push(data);
     }
 
@@ -1209,9 +1256,7 @@ const App = (function() {
     const d = drivers.find(x => x.id === id);
     if (!confirm(`Deseja realmente excluir o motorista ${d ? d.nome : ''}?`)) return;
 
-    if (isOnline && CONFIG.isConfigured) {
-      await sbDelete('drivers', id);
-    }
+    await dataDelete('drivers', id);
     drivers = drivers.filter(d => d.id !== id);
     saveLocal();
     populateDriverSelects();
@@ -1222,7 +1267,7 @@ const App = (function() {
   }
 
   // ========================
-  // MOTOR DE RELATÓRIOS (12 RELATÓRIOS CORRIGIDOS)
+  // MOTOR DE RELATÓRIOS
   // ========================
   let reportAtual = 'custoVeiculo';
 
@@ -1464,7 +1509,6 @@ const App = (function() {
             statusLabel = `<span class="badge warning">🔴 ${v.status}</span>`;
           }
 
-          // Busca último condutor a utilizar este veículo no histórico
           const ultKm = km.filter(k => k.placa === v.placa && k.motorista).sort((a, b) => (b.data || '').localeCompare(a.data || ''))[0];
           const condutor = ultKm ? ultKm.motorista : '-';
 
@@ -1513,12 +1557,10 @@ const App = (function() {
     const canvasFuel = document.getElementById('chart-fuel');
     const canvasKm = document.getElementById('chart-km');
 
-    // Últimos 6 abastecimentos
     const fValues = fueling.slice(-6).map(f => parseFloat(f.valor) || 0);
     const fLabels = fueling.slice(-6).map(f => (f.placa || '') + ' (' + (f.data ? f.data.slice(5) : '') + ')');
     if (canvasFuel) drawBarChart(canvasFuel, 'Abastecimentos Recentes (R$)', fValues, fLabels, true);
 
-    // Últimos 6 lançamentos de KM
     const kValues = km.slice(-6).map(k => {
       const dif = (parseInt(k.km_atual) || 0) - (parseInt(k.km_anterior) || 0);
       return dif > 0 ? dif : 0;
@@ -1547,7 +1589,6 @@ const App = (function() {
     const chartHeight = canvas.height - 70;
     const barWidth = Math.min((canvas.width - padding * 2) / values.length - 12, 60);
 
-    // Título
     ctx.fillStyle = '#f8fafc';
     ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'left';
@@ -1558,7 +1599,6 @@ const App = (function() {
       const h = (v / max) * chartHeight;
       const y = canvas.height - h - 35;
 
-      // Barra
       const grad = ctx.createLinearGradient(0, y, 0, y + h);
       grad.addColorStop(0, '#38bdf8');
       grad.addColorStop(1, '#0284c7');
@@ -1567,14 +1607,12 @@ const App = (function() {
       ctx.roundRect(x, y, barWidth, h, [4, 4, 0, 0]);
       ctx.fill();
 
-      // Valor no topo
       ctx.fillStyle = '#fff';
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'center';
       const txtVal = isMoney ? 'R$ ' + Math.round(v) : Math.round(v) + ' km';
       ctx.fillText(txtVal, x + barWidth / 2, y - 6);
 
-      // Legenda inferior
       ctx.fillStyle = '#94a3b8';
       ctx.font = '10px sans-serif';
       const lbl = labels[i] || '';
@@ -1623,11 +1661,99 @@ const App = (function() {
 
     window.print();
 
-    // Restaura display após o disparo da impressão
     setTimeout(() => {
       if (header) header.style.display = 'none';
       if (footer) footer.style.display = 'none';
     }, 1000);
+  }
+
+  // ========================
+  // MODAL DE CONFIGURAÇÃO ONLINE & REDE
+  // ========================
+  function openOnlineConfigModal() {
+    const modal = document.getElementById('online-config-modal');
+    if (!modal) return;
+    const titleEl = document.getElementById('cfg-status-title');
+    const descEl = document.getElementById('cfg-status-desc');
+    const serverUrlEl = document.getElementById('cfg-server-url');
+    const supUrlEl = document.getElementById('cfg-supabase-url');
+    const supKeyEl = document.getElementById('cfg-supabase-key');
+
+    if (serverUrlEl) {
+      serverUrlEl.value = window.location.origin;
+    }
+
+    if (backendMode === 'server') {
+      if (titleEl) {
+        titleEl.textContent = '🌐 Servidor Central Online Ativo';
+        titleEl.parentElement.style.borderLeftColor = 'var(--success)';
+      }
+      if (descEl) {
+        descEl.innerHTML = 'Este sistema está conectado ao <b>Servidor Central Integrado</b>. Todos os computadores ou celulares que acessarem este link compartilham a mesma base de dados em tempo real!';
+      }
+    } else if (backendMode === 'supabase') {
+      if (titleEl) {
+        titleEl.textContent = '☁️ Conectado ao Banco na Nuvem (Supabase)';
+        titleEl.parentElement.style.borderLeftColor = 'var(--info)';
+      }
+      if (descEl) {
+        descEl.innerHTML = 'O sistema está conectado ao banco de dados Supabase na nuvem. Todos os dispositivos compartilham os dados remotamente.';
+      }
+    } else {
+      if (titleEl) {
+        titleEl.textContent = '📴 Modo Local (Armazenamento neste Navegador)';
+        titleEl.parentElement.style.borderLeftColor = 'var(--warning)';
+      }
+      if (descEl) {
+        descEl.innerHTML = 'Os dados estão sendo salvos apenas no navegador deste dispositivo.';
+      }
+    }
+
+    if (supUrlEl) supUrlEl.value = localStorage.getItem('frota_custom_supabase_url') || CONFIG.SUPABASE_URL || '';
+    if (supKeyEl) supKeyEl.value = localStorage.getItem('frota_custom_supabase_key') || CONFIG.SUPABASE_KEY || '';
+
+    modal.classList.add('active');
+  }
+
+  async function testarConexaoSupabase() {
+    const url = (document.getElementById('cfg-supabase-url').value || '').trim();
+    const key = (document.getElementById('cfg-supabase-key').value || '').trim();
+    if (!url || !key) return alert('Informe a URL e a Chave do Supabase para testar.');
+
+    showToast('Testando conexão com Supabase...', 'info');
+    try {
+      const res = await fetch(`${url}/rest/v1/vehicles?select=count`, {
+        headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+      });
+      if (res.ok) {
+        alert('✅ Conexão com o Supabase estabelecida com sucesso!');
+      } else {
+        alert(`⚠️ Resposta do Supabase: Código HTTP ${res.status}. Verifique se a tabela 'vehicles' foi criada via supabase-setup.sql.`);
+      }
+    } catch (e) {
+      alert(`❌ Erro ao conectar no Supabase: ${e.message}`);
+    }
+  }
+
+  async function salvarConexaoSupabase() {
+    const url = (document.getElementById('cfg-supabase-url').value || '').trim();
+    const key = (document.getElementById('cfg-supabase-key').value || '').trim();
+
+    if (!url || !key) {
+      localStorage.removeItem('frota_custom_supabase_url');
+      localStorage.removeItem('frota_custom_supabase_key');
+      CONFIG.SUPABASE_URL = '';
+      CONFIG.SUPABASE_KEY = '';
+      showToast('Configuração de nuvem limpa. Utilizando o Servidor Central.', 'info');
+    } else {
+      localStorage.setItem('frota_custom_supabase_url', url);
+      localStorage.setItem('frota_custom_supabase_key', key);
+      CONFIG.SUPABASE_URL = url;
+      CONFIG.SUPABASE_KEY = key;
+      showToast('Configuração do Supabase salva com sucesso!', 'success');
+    }
+    closeModal('online-config-modal');
+    loadData();
   }
 
   // ========================
@@ -1646,11 +1772,9 @@ const App = (function() {
     for (const item of IMPORT_DATA) {
       const exists = vehicles.some(v => v.placa === item.placa);
       if (!exists) {
-        const novo = { ...item, id: Date.now() + count };
+        const res = await dataInsert('vehicles', item);
+        const novo = res && res.id ? res : { ...item, id: Date.now() + count };
         vehicles.push(novo);
-        if (isOnline && CONFIG.isConfigured) {
-          await sbInsert('vehicles', item);
-        }
         count++;
       }
     }
@@ -1723,18 +1847,21 @@ const App = (function() {
     let hash = null;
     if (senha) hash = await hashPassword(senha);
 
+    const userPayload = { nome, usuario, role, ativo };
+    if (hash) userPayload.senha = hash;
+
     if (editingUser) {
+      await dataUpdate('users', editingUser, userPayload);
       const idx = users.findIndex(x => x.id === editingUser);
       if (idx >= 0) {
-        users[idx].nome = nome;
-        users[idx].usuario = usuario;
-        users[idx].role = role;
-        users[idx].ativo = ativo;
-        if (hash) users[idx].senha = hash;
+        users[idx] = { ...users[idx], ...userPayload };
       }
     } else {
       if (!senha) return alert('Senha é obrigatória para novo usuário.');
-      users.push({ id: Date.now(), nome, usuario, senha: hash, role, ativo });
+      userPayload.senha = hash;
+      const res = await dataInsert('users', userPayload);
+      const newU = res && res.id ? res : { ...userPayload, id: Date.now() };
+      users.push(newU);
     }
 
     saveUsers();
@@ -1743,11 +1870,12 @@ const App = (function() {
     showToast('Usuário salvo com sucesso!', 'success');
   }
 
-  function deleteUser(id) {
+  async function deleteUser(id) {
     if (!requireAdmin()) return alert('Apenas administradores podem excluir usuários.');
     if (currentUser && currentUser.id === id) return alert('Você não pode excluir sua própria conta conectada.');
     if (!confirm('Deseja realmente excluir este usuário?')) return;
 
+    await dataDelete('users', id);
     users = users.filter(u => u.id !== id);
     saveUsers();
     renderUsers();
@@ -1854,7 +1982,9 @@ const App = (function() {
     // Relatórios
     selecionarRelatorio, gerarRelatorio, exportarExcel, imprimirRelatorio,
     // Usuários
-    openUserModal, editUser, saveUser, deleteUser
+    openUserModal, editUser, saveUser, deleteUser,
+    // Conexão Online
+    openOnlineConfigModal, testarConexaoSupabase, salvarConexaoSupabase
   };
 })();
 

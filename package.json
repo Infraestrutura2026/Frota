@@ -1,0 +1,16 @@
+{
+  "name": "frota-pro",
+  "version": "3.1.0",
+  "description": "Sistema de Gestão de Frotas — Complexo Penal de Marília",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "gestao-de-frotas",
+    "frota",
+    "complexo-penal-marilia"
+  ],
+  "author": "ZANONI & MARTINEZ TechInfra",
+  "license": "ISC"
+}

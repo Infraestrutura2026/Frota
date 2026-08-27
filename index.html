@@ -92,8 +92,9 @@
       <button class="btn-toggle-sidebar" id="btn-toggle-sidebar">☰</button>
       <h2 id="page-title">Dashboard</h2>
       <div class="topbar-actions">
+        <button type="button" class="btn btn-sm btn-secondary" onclick="App.openOnlineConfigModal()" title="Status da Conexão e Acesso na Rede">🌐 Conexão Online</button>
         <span id="mode-badge" style="display:none;font-size:11px;padding:4px 10px;border-radius:12px;background:var(--warning);color:#000;font-weight:600;">📴 Modo Offline</span>
-        <span style="color:var(--text-muted);font-size:13px;">v3.0</span>
+        <span style="color:var(--text-muted);font-size:13px;">v3.1</span>
       </div>
     </div>
 
@@ -591,6 +592,57 @@
     <div class="modal-footer">
       <button type="button" class="btn btn-secondary" onclick="App.closeModal('user-modal')">Cancelar</button>
       <button type="button" class="btn btn-primary" onclick="App.saveUser()">💾 Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Conexão Online e Rede -->
+<div class="modal-overlay" id="online-config-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>🌐 Status da Conexão e Acesso em Rede</h3>
+      <button type="button" class="modal-close" onclick="App.closeModal('online-config-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:16px;padding:14px;background:var(--bg-dark);border-radius:8px;border-left:4px solid var(--success);">
+        <h4 style="margin-bottom:6px;color:var(--primary-light);" id="cfg-status-title">🌐 Servidor Central Online Ativo</h4>
+        <p style="font-size:13px;color:var(--text-muted);" id="cfg-status-desc">
+          Este sistema está conectado ao servidor central. Todos os computadores que acessarem este endereço compartilham os mesmos dados em tempo real.
+        </p>
+      </div>
+
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>Endereço para outros computadores da rede acessarem:</label>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">
+          Abra o navegador em qualquer outro computador ou celular e acesse:
+        </p>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="cfg-server-url" class="form-control" readonly style="font-weight:600;color:var(--primary-light);">
+          <button type="button" class="btn btn-secondary" onclick="navigator.clipboard.writeText(document.getElementById('cfg-server-url').value); alert('Link copiado!');">📋 Copiar</button>
+        </div>
+      </div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;">
+
+      <h4 style="margin-bottom:8px;font-size:14px;">☁️ Conexão Opcional com Supabase (Nuvem Pública)</h4>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+        Se você já possui um projeto criado no Supabase e deseja sincronizar pela nuvem pública:
+      </p>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>URL do Supabase</label>
+        <input type="text" id="cfg-supabase-url" class="form-control" placeholder="https://seu-projeto.supabase.co">
+      </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>Chave Anon Public</label>
+        <input type="password" id="cfg-supabase-key" class="form-control" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button type="button" class="btn btn-secondary" onclick="App.testarConexaoSupabase()">🔍 Testar Conexão</button>
+        <button type="button" class="btn btn-primary" onclick="App.salvarConexaoSupabase()">💾 Salvar e Conectar</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="App.closeModal('online-config-modal')">Fechar</button>
     </div>
   </div>
 </div>
