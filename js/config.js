@@ -1,33 +1,31 @@
 // ==========================================
-// FROTA PRO v3.0 - Configuração Supabase
+// FROTA PRO v3.1 — Configuração do Sistema
 // ==========================================
 // INSTRUÇÕES:
-// 1. Crie uma conta em https://supabase.com (gratuito)
-// 2. Crie um novo projeto
-// 3. Vá em Project Settings > API
-// 4. Copie a "URL" e a "anon public" API Key
-// 5. Cole abaixo substituindo os placeholders
-// 6. Execute o script supabase-setup.sql no SQL Editor
+// Para ativar a sincronização em nuvem via Supabase:
+// 1. Crie um projeto em https://supabase.com
+// 2. Vá em Project Settings > API
+// 3. Copie a URL e a chave 'anon public' e cole abaixo.
 //
-// Enquanto não configurar, o sistema funciona em MODO LOCAL
-// (dados salvos no navegador via localStorage)
+// Enquanto não configurado, o sistema funciona 100% em MODO LOCAL
+// com todos os 29 veículos de Marília salvos e operacionais no navegador.
 
 const CONFIG = {
-  // SUBSTITUA pelos valores reais do seu projeto Supabase:
-  SUPABASE_URL: 'https://xmfycyxpmspdpxwmkjzz.supabase.co',
-  SUPABASE_KEY: 'sb_publishable_WUuyYXBhtsM9p9IiW3GWFw_vixnqWOW',
+  // Insira sua URL e Key do Supabase aqui (se for usar na nuvem):
+  SUPABASE_URL: '',
+  SUPABASE_KEY: '',
 
-  VERSION: '3.0',
+  VERSION: '3.1',
   APP_NAME: 'Frota Pro',
 
-  // Login local (funciona sem internet/backend)
+  // Login padrão (funciona em qualquer dispositivo/ambiente)
   LOCAL_USER: 'admin',
   LOCAL_PASS: 'admin2025',
 
-  // Detecta se o Supabase foi configurado
+  // Detecta se o Supabase foi preenchido com URL e chave válidas
   get isConfigured() {
-    const url = this.SUPABASE_URL;
-    const key = this.SUPABASE_KEY;
-    return url && key && !url.includes('SEU-PROJETO') && !key.includes('SUA-CHAVE');
+    const url = (this.SUPABASE_URL || '').trim();
+    const key = (this.SUPABASE_KEY || '').trim();
+    return Boolean(url && key && !url.includes('SEU-PROJETO') && !key.includes('SUA-CHAVE') && url.startsWith('http'));
   }
 };
