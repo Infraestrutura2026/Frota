@@ -8,10 +8,10 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>Frota Pro v3.0</title>
+  <title>Frota Pro v3.1</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="images/icon-192.png">
-  <link rel="stylesheet" href="css/style.css?v=3.2">
+  <link rel="stylesheet" href="css/style.css?v=3.3">
   <script>
     // Limpeza automática de Service Worker antigo e caches para forçar carregamento da versão atualizada
     if ('serviceWorker' in navigator) {
@@ -30,28 +30,101 @@
 
 <!-- ========== TELA DE LOGIN ========== -->
 <div id="login-screen" class="login-body" style="display:none;">
-  <div class="login-container">
-    <div class="login-card">
-      <div class="login-logo">
-        <div class="logo-icon">🚗</div>
-        <h1>Frota <span style="color:var(--primary-light);">Pro</span></h1>
-        <p>Sistema de Gestão de Frotas v3.0</p>
+  <section class="login-brand-panel" aria-label="Identidade da Polícia Penal de São Paulo">
+    <div class="login-panel-orbit login-panel-orbit-one" aria-hidden="true"></div>
+    <div class="login-panel-orbit login-panel-orbit-two" aria-hidden="true"></div>
+
+    <div class="login-watermark" aria-hidden="true">
+      <img src="images/brasao-policia-penal-sp.png" alt="">
+    </div>
+
+    <div class="login-brand-content">
+      <div class="login-emblem-lockup">
+        <div class="login-emblem-mini" aria-hidden="true">
+          <img src="images/brasao-policia-penal-sp.png" alt="">
+        </div>
+        <div class="login-emblem-copy">
+          <span>POLÍCIA PENAL</span>
+          <strong>São Paulo</strong>
+        </div>
       </div>
-      <div id="login-alert" class="alert" style="display:none;"></div>
-      <div class="form-group">
-        <label>Usuário</label>
-        <input type="text" id="login-user" class="form-control" placeholder="admin" value="admin">
-      </div>
-      <div class="form-group">
-        <label>Senha</label>
-        <input type="password" id="login-pass" class="form-control" placeholder="••••••••">
-      </div>
-      <button id="btn-login" class="btn btn-primary">🚀 Entrar no Sistema</button>
-      <div class="login-footer">
-        <p style="margin-top:8px;opacity:0.3;">ZANONI & MARTINEZ TechInfra</p>
+
+      <div class="login-hero-copy">
+        <span class="login-kicker">SEGURANÇA • GESTÃO • EFICIÊNCIA</span>
+        <h1>Gestão que<br><em>protege.</em></h1>
+        <p>Uma operação mais inteligente para cuidar de cada rota, veículo e missão.</p>
       </div>
     </div>
-  </div>
+
+    <div class="login-brand-footer">
+      <span>SECRETARIA DA ADMINISTRAÇÃO PENITENCIÁRIA</span>
+      <span>COMPLEXO PENAL DE MARÍLIA <b>•</b> SP</span>
+    </div>
+  </section>
+
+  <section class="login-form-panel" aria-label="Acesso ao sistema">
+    <div class="login-form-wrap">
+      <div class="login-form-heading">
+        <div class="login-access-row">
+          <span class="login-form-eyebrow">ACESSO RESTRITO</span>
+          <span class="login-secure-badge"><span aria-hidden="true"></span> Ambiente seguro</span>
+        </div>
+        <h2>Bem-vindo de volta</h2>
+        <p>Entre com suas credenciais para acessar o sistema de gestão de frotas.</p>
+      </div>
+
+      <div id="login-alert" class="login-alert" role="alert" aria-live="polite" style="display:none;"></div>
+
+      <form id="login-form" class="login-form" autocomplete="on" novalidate>
+        <div class="form-group">
+          <label for="login-user">Usuário</label>
+          <div class="login-input-wrap">
+            <svg class="login-input-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M20 21a8 8 0 0 0-16 0M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <input type="text" id="login-user" class="form-control" placeholder="Digite seu usuário" value="admin" autocomplete="username">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="login-pass">Senha</label>
+          <div class="login-input-wrap">
+            <svg class="login-input-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="4" y="10" width="16" height="11" rx="2" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <input type="password" id="login-pass" class="form-control" placeholder="Digite sua senha" autocomplete="current-password">
+            <button type="button" class="login-password-toggle" id="toggle-login-password" aria-label="Mostrar senha" title="Mostrar senha">
+              <svg class="login-eye-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="2.5" stroke="currentColor" stroke-width="1.8"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <button id="btn-login" type="submit" class="btn btn-primary login-submit">
+          <span>Entrar no sistema</span>
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M4 10h11M10.5 5.5 15 10l-4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </form>
+
+      <div class="login-security-note">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 3 19 6v5c0 4.5-2.9 7.7-7 9-4.1-1.3-7-4.5-7-9V6l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+          <path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Seus dados são protegidos e o acesso é registrado.</span>
+      </div>
+
+      <div class="login-footer">
+        <span>Frota <b>Pro</b></span>
+        <span>v3.1 <i aria-hidden="true">•</i> Gestão de Frotas</span>
+      </div>
+    </div>
+  </section>
 </div>
 
 <!-- ========== APLICAÇÃO ========== -->
@@ -672,7 +745,7 @@
 </div>
 
 <div id="toast-container" class="toast-container"></div>
-<script src="js/config.js?v=3.2"></script>
-<script src="js/app.js?v=3.2"></script>
+<script src="js/config.js?v=3.3"></script>
+<script src="js/app.js?v=3.3"></script>
 </body>
 </html>
