@@ -140,55 +140,20 @@ html, body {
   top: calc(12% + 70px);
   opacity: 0.6;
 }
-.login-brand-content,
-.login-brand-footer {
+.login-brand-content {
   position: relative;
   z-index: 2;
-}
-.login-emblem-lockup {
   display: flex;
+  flex: 1;
   align-items: center;
-  gap: 14px;
-}
-.login-emblem-mini {
-  display: grid;
-  place-items: center;
-  width: 50px;
-  height: 58px;
-  filter: drop-shadow(0 8px 16px rgba(0,0,0,0.24));
-}
-.login-emblem-mini img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  filter: grayscale(1) brightness(0) invert(1);
-  opacity: 0.9;
-}
-.login-emblem-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  line-height: 1.1;
-  border-left: 1px solid rgba(255,255,255,0.26);
-  padding-left: 14px;
-}
-.login-emblem-copy span {
-  color: #e0f2fe;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 1.9px;
-}
-.login-emblem-copy strong {
-  color: #7dd3fc;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  justify-content: center;
 }
 .login-hero-copy {
+  width: 100%;
   max-width: 500px;
-  margin-top: clamp(84px, 14vh, 168px);
+  margin: 0 auto;
+  text-align: center;
 }
-.login-kicker,
 .login-form-eyebrow {
   display: inline-block;
   color: #7dd3fc;
@@ -198,18 +163,16 @@ html, body {
   line-height: 1.4;
 }
 .login-hero-copy h1 {
-  margin: 18px 0 20px;
-  font-size: clamp(42px, 5vw, 72px);
+  margin: 0 auto 18px;
+  color: #fff;
+  font-size: clamp(36px, 4.2vw, 58px);
   font-weight: 800;
-  letter-spacing: -3px;
-  line-height: 0.99;
-}
-.login-hero-copy h1 em {
-  color: #7dd3fc;
-  font-style: normal;
+  letter-spacing: -2.6px;
+  line-height: 1.05;
 }
 .login-hero-copy p {
   max-width: 340px;
+  margin: 0 auto;
   color: rgba(226, 232, 240, 0.72);
   font-size: clamp(13px, 1.25vw, 16px);
   line-height: 1.7;
@@ -237,10 +200,12 @@ html, body {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  filter: grayscale(1) brightness(0) invert(1);
-  opacity: 0.09;
+  filter: saturate(0.86) contrast(0.92);
+  opacity: 0.2;
 }
 .login-brand-footer {
+  position: relative;
+  z-index: 2;
   display: flex;
   justify-content: space-between;
   gap: 24px;
@@ -1331,12 +1296,7 @@ select.form-control {
     min-height: 350px;
     padding: 30px 30px 26px;
   }
-  .login-hero-copy {
-    margin-top: 54px;
-  }
   .login-hero-copy h1 {
-    margin-top: 14px;
-    margin-bottom: 12px;
     font-size: 42px;
     letter-spacing: -2px;
   }
