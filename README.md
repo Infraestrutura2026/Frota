@@ -61,6 +61,18 @@ Frota/
 
 ---
 
+## ☁️ Publicação na Vercel com Neon (produção)
+
+Para disponibilizar o sistema na internet com dados compartilhados entre os computadores, use **Vercel + Neon PostgreSQL**. O arquivo `api/[...path].js` mantém as rotas `/api/*` e substitui o armazenamento local em JSON por um banco persistente.
+
+1. Crie um projeto gratuito no [Neon](https://neon.tech) e copie a **connection string** PostgreSQL.
+2. Na Vercel, importe o repositório `Infraestrutura2026/Frota` ou execute `npx vercel login` e `npx vercel --prod`.
+3. Cadastre a variável `DATABASE_URL` no projeto da Vercel para os ambientes **Production**, **Preview** e **Development**.
+4. Faça o deploy. Na primeira requisição, a API cria a tabela `frota_records` e carrega automaticamente os 29 veículos e o usuário administrador inicial.
+5. Valide a publicação acessando `/api/status`; a resposta deve informar `online: true` e `mode: "neon"`.
+
+> A connection string do Neon é um segredo: ela deve ficar somente nas variáveis de ambiente da Vercel e nunca no código ou no Git. O servidor local continua usando `data/db.json` para desenvolvimento.
+
 ## 🛠️ Configuração e Execução
 
 ### Acesso Rápido Local (Desenvolvimento / Teste)
