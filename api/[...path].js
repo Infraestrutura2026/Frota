@@ -180,8 +180,15 @@ async function handle(req, res) {
     }
 
     if (resource === 'data' && req.method === 'GET') {
-      const collections = await Promise.all(COLLECTIONS.map(getCollection));
-      return send(res, 200, Object.fromEntries(COLLECTIONS.map((name, index) => [name, collections[index]])));
+      // Uma única consulta evita concorrência de conexões no driver HTTP do Neon.
+      const rows = await sql`
+        SELECT resource, id, data, created_at
+        FROM frota_records
+        ORDER BY resource, id
+      `;
+      const collections = Object.fromEntries(COLLECTIONS.map(name => [name, []]));
+      rows.forEach(row => collections[row.resource].push(asRecord(row)));
+      return send(res, 200, collections);
     }
 
     if (resource === 'seed' && req.method === 'POST') {
