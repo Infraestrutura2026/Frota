@@ -12,5 +12,8 @@
     "complexo-penal-marilia"
   ],
   "author": "ZANONI & MARTINEZ TechInfra",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0"
+  }
 }

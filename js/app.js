@@ -270,8 +270,21 @@ const App = (function() {
   }
 
   function bindEvents() {
-    const btnLogin = document.getElementById('btn-login');
-    if (btnLogin) btnLogin.addEventListener('click', doLogin);
+    const loginForm = document.getElementById('login-form');
+    if (loginForm) loginForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      doLogin();
+    });
+
+    const toggleLoginPassword = document.getElementById('toggle-login-password');
+    if (toggleLoginPassword) toggleLoginPassword.addEventListener('click', () => {
+      const passwordInput = document.getElementById('login-pass');
+      if (!passwordInput) return;
+      const showing = passwordInput.type === 'text';
+      passwordInput.type = showing ? 'password' : 'text';
+      toggleLoginPassword.setAttribute('aria-label', showing ? 'Mostrar senha' : 'Ocultar senha');
+      toggleLoginPassword.setAttribute('title', showing ? 'Mostrar senha' : 'Ocultar senha');
+    });
 
     const btnLogout = document.getElementById('btn-logout');
     if (btnLogout) btnLogout.addEventListener('click', doLogout);
@@ -329,7 +342,10 @@ const App = (function() {
     const loginPass = document.getElementById('login-pass');
     if (loginPass) {
       loginPass.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doLogin();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          doLogin();
+        }
       });
     }
   }
@@ -417,7 +433,7 @@ const App = (function() {
   }
 
   function showLogin() {
-    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('login-screen').style.display = 'grid';
     document.getElementById('app-screen').style.display = 'none';
     const alertEl = document.getElementById('login-alert');
     if (alertEl) alertEl.style.display = 'none';
