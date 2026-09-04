@@ -1765,6 +1765,63 @@ select.form-control {
   box-shadow: 12px 0 30px rgba(30, 64, 96, 0.18);
 }
 
+/* ========== MODAIS DO PAINEL — MODO CLARO ========== */
+/* Os modais ficam fora de .app-container no HTML; estes estilos garantem que
+   a edição de veículos e demais formulários não herde a paleta escura antiga. */
+.modal-overlay .modal {
+  color: #173d5b;
+  background: #ffffff;
+  border-color: #cbdde8;
+  box-shadow: 0 24px 50px rgba(30, 64, 96, 0.22);
+}
+.modal-overlay .modal-header {
+  background: #f7fbfd;
+  border-bottom-color: #dce8ef;
+}
+.modal-overlay .modal-header h3 {
+  color: #173d5b;
+}
+.modal-overlay .modal-body {
+  background: #ffffff;
+}
+.modal-overlay .modal-footer {
+  background: #f2f7fa;
+  border-top-color: #dce8ef;
+}
+.modal-overlay .modal .form-group label {
+  color: #34566f;
+}
+.modal-overlay .modal .form-control {
+  color: #173852;
+  background: #ffffff;
+  border-color: #cbdde8;
+}
+.modal-overlay .modal .form-control::placeholder {
+  color: #8aa0b2;
+}
+.modal-overlay .modal .form-control:hover {
+  border-color: #9fc6dc;
+}
+.modal-overlay .modal .form-control:focus {
+  color: #173852;
+  background: #ffffff;
+  border-color: #168bd0;
+  box-shadow: 0 0 0 4px rgba(22, 139, 208, 0.14), 0 3px 10px rgba(30, 64, 96, 0.06);
+}
+.modal-overlay .modal .form-control[readonly] {
+  color: #49677f;
+  background: #f2f7fa;
+}
+.modal-overlay .modal-close {
+  color: #5d788d;
+  border-radius: 6px;
+}
+.modal-overlay .modal-close:hover,
+.modal-overlay .modal-close:focus-visible {
+  color: #a52f2f;
+  background: #fff0f0;
+}
+
 /* ========== RESPONSIVIDADE ========== */
 @media (max-width: 768px) {
   .login-body {
