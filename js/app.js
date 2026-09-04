@@ -58,6 +58,40 @@ const App = (function() {
     { placa: 'GIT5825', grupo: 'S4', marca: 'MITSUBISHI', modelo: 'OUTLANDER 2.0 P', ano: 2020, cor: 'PRATA', chassi: 'JMYXTGF7WLZA00114', renavam: '1216646934', hodometro: 233678, status: 'ATIVO', combustivel: 'GASOLINA', capacidade: 7 }
   ];
 
+  const GROUP_DEFINITIONS = {
+    S2: { label: 'Grupo S2', icon: '🚐', className: 'group-s2' },
+    S3: { label: 'Grupo S3', icon: '🚚', className: 'group-s3' },
+    S4: { label: 'Grupo S4', icon: '🚛', className: 'group-s4' }
+  };
+
+  function normalizeGroup(group) {
+    const value = String(group || '').trim().toUpperCase();
+    return value || 'SEM GRUPO';
+  }
+
+  function getGroupKeys(items = []) {
+    const keys = ['S2', 'S3', 'S4'];
+    items.forEach(item => {
+      const group = normalizeGroup(item.grupo);
+      if (!keys.includes(group)) keys.push(group);
+    });
+    return keys;
+  }
+
+  function getGroupInfo(group) {
+    const key = normalizeGroup(group);
+    return GROUP_DEFINITIONS[key] || {
+      label: key === 'SEM GRUPO' ? 'Sem grupo definido' : `Grupo ${key}`,
+      icon: '🚗',
+      className: 'group-other'
+    };
+  }
+
+  function getVehicleGroupKey(placa) {
+    const vehicle = vehicles.find(item => item.placa === placa);
+    return normalizeGroup(vehicle && vehicle.grupo);
+  }
+
   // ========================
   // NOTIFICAÇÕES (TOAST)
   // ========================
@@ -854,31 +888,61 @@ const App = (function() {
   // MÓDULO: VEÍCULOS
   // ========================
   function renderVehicles() {
-    const search = (document.getElementById('vehicle-search').value || '').toLowerCase().trim();
-    const filter = (document.getElementById('vehicle-status-filter').value || '').toUpperCase();
+    const searchEl = document.getElementById('vehicle-search');
+    const filterEl = document.getElementById('vehicle-status-filter');
+    const groupsEl = document.getElementById('vehicles-groups');
+    if (!groupsEl) return;
+
+    const search = (searchEl ? searchEl.value : '').toLowerCase().trim();
+    const filter = (filterEl ? filterEl.value : '').toUpperCase();
     const filtered = vehicles.filter(v => {
       const matchSearch = `${v.placa} ${v.marca} ${v.modelo} ${v.grupo}`.toLowerCase().includes(search);
       const matchStatus = !filter || (v.status || '').toUpperCase() === filter;
       return matchSearch && matchStatus;
     });
 
-    document.getElementById('vehicle-count').textContent = `${filtered.length} veículo(s) de ${vehicles.length}`;
-    const tbody = document.getElementById('vehicles-table');
-    tbody.innerHTML = filtered.map(v => `
-      <tr>
-        <td><span class="placa-badge">${v.placa}</span></td>
-        <td><span class="badge default">${v.grupo || '-'}</span></td>
-        <td><b>${v.marca || ''}</b> ${v.modelo || ''}</td>
-        <td>${v.ano || '-'}</td>
-        <td><b>${(v.hodometro || 0).toLocaleString('pt-BR')} km</b></td>
-        <td><span class="badge ${badgeClass(v.status)}"><span class="status-dot"></span>${v.status || 'ATIVO'}</span></td>
-        <td>${v.combustivel || '-'}</td>
-        <td>
-          <button class="btn btn-sm btn-primary" title="Editar Veículo" onclick="App.editVehicle(${v.id})">✏️</button>
-          <button class="btn btn-sm btn-danger" title="Excluir Veículo" onclick="App.deleteVehicle(${v.id})">🗑️</button>
-        </td>
-      </tr>
-    `).join('') || '<tr><td colspan="8" class="empty-state"><div class="empty-icon">🚗</div><h4>Nenhum veículo encontrado</h4></td></tr>';
+    const countEl = document.getElementById('vehicle-count');
+    if (countEl) countEl.textContent = `${filtered.length} veículo(s) de ${vehicles.length}`;
+
+    groupsEl.innerHTML = getGroupKeys(vehicles).map(group => {
+      const info = getGroupInfo(group);
+      const groupVehicles = filtered.filter(v => normalizeGroup(v.grupo) === group);
+      const rows = groupVehicles.map(v => `
+        <tr>
+          <td><span class="placa-badge">${v.placa}</span></td>
+          <td><b>${v.marca || ''}</b> ${v.modelo || ''}</td>
+          <td>${v.ano || '-'}</td>
+          <td><b>${(v.hodometro || 0).toLocaleString('pt-BR')} km</b></td>
+          <td><span class="badge ${badgeClass(v.status)}"><span class="status-dot"></span>${v.status || 'ATIVO'}</span></td>
+          <td>${v.combustivel || '-'}</td>
+          <td>
+            <button class="btn btn-sm btn-primary" title="Editar Veículo" onclick="App.editVehicle(${v.id})">✏️</button>
+            <button class="btn btn-sm btn-danger" title="Excluir Veículo" onclick="App.deleteVehicle(${v.id})">🗑️</button>
+          </td>
+        </tr>
+      `).join('') || `<tr><td colspan="7" class="empty-state group-empty-state"><div class="empty-icon">${info.icon}</div><h4>Nenhum veículo neste grupo</h4><p>Altere os filtros para visualizar outros veículos.</p></td></tr>`;
+
+      return `
+        <section class="fleet-group-module ${info.className}" aria-labelledby="vehicles-${group.toLowerCase()}-title">
+          <div class="fleet-group-header">
+            <div class="fleet-group-heading">
+              <span class="fleet-group-icon" aria-hidden="true">${info.icon}</span>
+              <div>
+                <h4 id="vehicles-${group.toLowerCase()}-title">${info.label}</h4>
+                <span>Veículos cadastrados neste grupo</span>
+              </div>
+            </div>
+            <span class="fleet-group-count">${groupVehicles.length} veículo(s)</span>
+          </div>
+          <div class="fleet-group-content table-responsive">
+            <table class="data-table">
+              <thead><tr><th>Placa</th><th>Marca / Modelo</th><th>Ano</th><th>KM Atual</th><th>Status</th><th>Combustível</th><th>Ações</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </section>
+      `;
+    }).join('');
   }
 
   function badgeClass(status) {
@@ -1124,28 +1188,105 @@ const App = (function() {
   // ========================
   // MÓDULO: QUILOMETRAGEM
   // ========================
+  function renderKmHistoryRow(k) {
+    const diff = (parseInt(k.km_atual) || 0) - (parseInt(k.km_anterior) || 0);
+    return `
+      <tr>
+        <td>${k.data ? formatDateBR(k.data) : '-'}</td>
+        <td><span class="placa-badge">${k.placa}</span></td>
+        <td>${(k.km_anterior || 0).toLocaleString('pt-BR')} km</td>
+        <td><b>${(k.km_atual || 0).toLocaleString('pt-BR')} km</b></td>
+        <td style="color:${diff >= 0 ? 'var(--success)' : 'var(--danger)'};font-weight:700;">
+          ${diff >= 0 ? '+' : ''}${diff.toLocaleString('pt-BR')} km
+        </td>
+        <td><small style="color:var(--text-muted);">${k.observacao || '-'}</small></td>
+        <td>
+          <button class="btn btn-sm btn-primary" title="Editar Quilometragem" onclick="App.editKm(${k.id})">✏️</button>
+          <button class="btn btn-sm btn-danger" title="Excluir Lançamento" onclick="App.deleteKm(${k.id})">🗑️</button>
+        </td>
+      </tr>
+    `;
+  }
+
+  function openKmForVehicle(placa) {
+    openModal('km-modal');
+    const select = document.getElementById('k-placa');
+    if (select) {
+      select.value = placa;
+      preencherKmAnteriorAutomatico(placa);
+    }
+  }
+
   function renderKm() {
-    const tbody = document.getElementById('km-table');
-    tbody.innerHTML = km.slice().reverse().map(k => {
-      const diff = (parseInt(k.km_atual) || 0) - (parseInt(k.km_anterior) || 0);
+    const groupsEl = document.getElementById('km-groups');
+    if (!groupsEl) return;
+
+    const groupKeys = getGroupKeys(vehicles);
+    km.forEach(registro => {
+      const group = getVehicleGroupKey(registro.placa);
+      if (!groupKeys.includes(group)) groupKeys.push(group);
+    });
+
+    groupsEl.innerHTML = groupKeys.map(group => {
+      const info = getGroupInfo(group);
+      const groupVehicles = vehicles.filter(v => normalizeGroup(v.grupo) === group);
+      const groupRecords = km.filter(registro => getVehicleGroupKey(registro.placa) === group);
+
+      const vehicleRows = groupVehicles.map(v => {
+        const registros = km.filter(registro => registro.placa === v.placa);
+        const ultimo = getUltimoLancamentoKm(v.placa);
+        const ultimoDiff = ultimo
+          ? (parseInt(ultimo.km_atual) || 0) - (parseInt(ultimo.km_anterior) || 0)
+          : 0;
+        return `
+          <tr>
+            <td><span class="placa-badge">${v.placa}</span></td>
+            <td><b>${v.marca || ''}</b> ${v.modelo || ''}</td>
+            <td><b>${(v.hodometro || 0).toLocaleString('pt-BR')} km</b></td>
+            <td>${ultimo ? formatDateBR(ultimo.data) : '<span class="text-muted">Sem lançamento</span>'}</td>
+            <td style="color:${ultimo ? (ultimoDiff >= 0 ? 'var(--success)' : 'var(--danger)') : 'var(--text-muted)'};font-weight:700;">
+              ${ultimo ? `${ultimoDiff >= 0 ? '+' : ''}${ultimoDiff.toLocaleString('pt-BR')} km` : '-'}
+            </td>
+            <td>${registros.length}</td>
+            <td><button class="btn btn-sm btn-primary" title="Registrar Quilometragem para ${v.placa}" onclick="App.openKmForVehicle('${v.placa}')">+ Registrar</button></td>
+          </tr>
+        `;
+      }).join('') || `<tr><td colspan="7" class="empty-state group-empty-state"><div class="empty-icon">${info.icon}</div><h4>Nenhum veículo neste grupo</h4></td></tr>`;
+
+      const history = groupRecords.length > 0 ? `
+        <details class="km-group-history">
+          <summary>Ver histórico de lançamentos (${groupRecords.length})</summary>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead><tr><th>Data</th><th>Placa</th><th>KM Anterior</th><th>KM Atual</th><th>Diferença</th><th>Observação</th><th>Ações</th></tr></thead>
+              <tbody>${groupRecords.slice().sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)).map(renderKmHistoryRow).join('')}</tbody>
+            </table>
+          </div>
+        </details>
+      ` : '<p class="group-helper-text">Nenhum lançamento registrado para este grupo.</p>';
+
       return `
-        <tr>
-          <td>${k.data ? formatDateBR(k.data) : '-'}</td>
-          <td><span class="placa-badge">${k.placa}</span></td>
-          <td>${(k.km_anterior || 0).toLocaleString('pt-BR')} km</td>
-          <td><b>${(k.km_atual || 0).toLocaleString('pt-BR')} km</b></td>
-          <td style="color:${diff >= 0 ? 'var(--success)' : 'var(--danger)'};font-weight:700;">
-            ${diff >= 0 ? '+' : ''}${diff.toLocaleString('pt-BR')} km
-          </td>
-          <td><b>${k.motorista || '-'}</b></td>
-          <td><small style="color:var(--text-muted);">${k.observacao || '-'}</small></td>
-          <td>
-            <button class="btn btn-sm btn-primary" title="Editar Quilometragem" onclick="App.editKm(${k.id})">✏️</button>
-            <button class="btn btn-sm btn-danger" title="Excluir Lançamento" onclick="App.deleteKm(${k.id})">🗑️</button>
-          </td>
-        </tr>
+        <section class="fleet-group-module ${info.className}" aria-labelledby="km-${group.toLowerCase()}-title">
+          <div class="fleet-group-header">
+            <div class="fleet-group-heading">
+              <span class="fleet-group-icon" aria-hidden="true">${info.icon}</span>
+              <div>
+                <h4 id="km-${group.toLowerCase()}-title">${info.label}</h4>
+                <span>Controle de quilometragem por veículo</span>
+              </div>
+            </div>
+            <span class="fleet-group-count">${groupVehicles.length} veículo(s) · ${groupRecords.length} lançamento(s)</span>
+          </div>
+          <div class="fleet-group-content table-responsive">
+            <table class="data-table km-summary-table">
+              <thead><tr><th>Placa</th><th>Veículo</th><th>Hodômetro Atual</th><th>Último Lançamento</th><th>KM Rodados</th><th>Registros</th><th>Ação</th></tr></thead>
+              <tbody>${vehicleRows}</tbody>
+            </table>
+          </div>
+          ${history}
+        </section>
       `;
-    }).join('') || '<tr><td colspan="8" class="empty-state"><div class="empty-icon">📍</div><h4>Nenhum registro de quilometragem</h4></td></tr>';
+    }).join('');
   }
 
   function editKm(id) {
@@ -2034,7 +2175,7 @@ const App = (function() {
     // Manutenção
     editMaintenance, saveMaintenance, deleteMaintenance,
     // Quilometragem
-    editKm, saveKm, deleteKm,
+    openKmForVehicle, editKm, saveKm, deleteKm,
     // Motoristas
     editDriver, saveDriver, deleteDriver,
     // Relatórios

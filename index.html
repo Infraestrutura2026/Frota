@@ -11,7 +11,7 @@
   <title>Frota Pro v3.1</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="images/icon-192.png">
-  <link rel="stylesheet" href="css/style.css?v=3.6">
+  <link rel="stylesheet" href="css/style.css?v=3.7">
   <script>
     // Limpeza automática de Service Worker antigo e caches para forçar carregamento da versão atualizada
     if ('serviceWorker' in navigator) {
@@ -257,14 +257,13 @@
       </div>
       <div class="card">
         <div class="card-header">
-          <h3>🚗 Lista de Veículos</h3>
+          <h3>🚗 Lista de Veículos por Grupo</h3>
           <span id="vehicle-count" style="color:var(--text-muted);font-size:13px;">0 veículo(s)</span>
         </div>
-        <div class="card-body table-responsive">
-          <table class="data-table">
-            <thead><tr><th>Placa</th><th>Grupo</th><th>Marca/Modelo</th><th>Ano</th><th>KM Atual</th><th>Status</th><th>Combustível</th><th>Ações</th></tr></thead>
-            <tbody id="vehicles-table"><tr><td colspan="8" class="empty-state"><div class="empty-icon">🚗</div><h4>Carregando veículos...</h4></td></tr></tbody>
-          </table>
+        <div class="card-body">
+          <div id="vehicles-groups" class="group-modules" aria-live="polite">
+            <div class="empty-state"><div class="empty-icon">🚗</div><h4>Carregando veículos...</h4></div>
+          </div>
         </div>
       </div>
     </div>
@@ -307,12 +306,11 @@
         <button class="btn btn-primary" onclick="App.openModal('km-modal')">+ Registrar Quilometragem</button>
       </div>
       <div class="card">
-        <div class="card-header"><h3>📍 Registros de Quilometragem</h3></div>
-        <div class="card-body table-responsive">
-          <table class="data-table">
-            <thead><tr><th>Data</th><th>Placa</th><th>KM Anterior</th><th>KM Atual</th><th>Diferença</th><th>Motorista</th><th>Observação</th><th>Ações</th></tr></thead>
-            <tbody id="km-table"><tr><td colspan="8" class="empty-state"><div class="empty-icon">📍</div><h4>Carregando...</h4></td></tr></tbody>
-          </table>
+        <div class="card-header"><h3>📍 Quilometragem por Grupo</h3></div>
+        <div class="card-body">
+          <div id="km-groups" class="group-modules" aria-live="polite">
+            <div class="empty-state"><div class="empty-icon">📍</div><h4>Carregando quilometragem...</h4></div>
+          </div>
         </div>
       </div>
     </div>
