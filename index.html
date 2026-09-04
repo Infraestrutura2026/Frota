@@ -131,12 +131,9 @@
     <nav class="sidebar-nav">
       <div class="nav-item active" data-page="dashboard"><span class="nav-icon">📊</span><span class="nav-label">Dashboard</span></div>
       <div class="nav-item" data-page="vehicles"><span class="nav-icon">🚗</span><span class="nav-label">Veículos</span></div>
-      <div class="nav-item" data-page="fueling"><span class="nav-icon">⛽</span><span class="nav-label">Abastecimento</span></div>
       <div class="nav-item" data-page="maintenance"><span class="nav-icon">🔧</span><span class="nav-label">Manutenção</span></div>
       <div class="nav-item" data-page="km"><span class="nav-icon">📍</span><span class="nav-label">Quilometragem</span></div>
-      <div class="nav-item" data-page="drivers"><span class="nav-icon">👤</span><span class="nav-label">Motoristas</span></div>
       <div class="nav-item" data-page="reports"><span class="nav-icon">📈</span><span class="nav-label">Relatórios</span></div>
-      <div class="nav-item" data-page="import" id="nav-import"><span class="nav-icon">📥</span><span class="nav-label">Importar Dados</span></div>
       <div class="nav-item" data-page="users" id="nav-users"><span class="nav-icon">🔐</span><span class="nav-label">Usuários</span></div>
     </nav>
     <div class="sidebar-footer">
@@ -169,7 +166,6 @@
     <div id="page-dashboard" class="page-section active">
       <!-- Quick Actions -->
       <div class="quick-actions">
-        <button type="button" class="quick-btn" onclick="App.openModal('fueling-modal')">⛽ Registrar Abastecimento</button>
         <button type="button" class="quick-btn" onclick="App.openModal('km-modal')">📍 Registrar KM / Viagem</button>
         <button type="button" class="quick-btn" onclick="App.openModal('maintenance-modal')">🔧 Registrar Manutenção</button>
         <button type="button" class="quick-btn" onclick="App.openVehicleModal()">🚗 + Novo Veículo</button>
