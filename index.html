@@ -484,6 +484,20 @@
   </div>
 </div>
 
+<!-- Resumo do Veículo -->
+<div class="modal-overlay" id="vehicle-summary-modal">
+  <div class="modal vehicle-summary-modal" role="dialog" aria-modal="true" aria-labelledby="vehicle-summary-title">
+    <div class="modal-header">
+      <h3 id="vehicle-summary-title">Resumo do Veículo</h3>
+      <button type="button" class="modal-close" onclick="App.closeModal('vehicle-summary-modal')" aria-label="Fechar resumo">&times;</button>
+    </div>
+    <div class="modal-body vehicle-summary-body" id="vehicle-summary-body"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="App.closeModal('vehicle-summary-modal')">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Abastecimento -->
 <div class="modal-overlay" id="fueling-modal">
   <div class="modal">

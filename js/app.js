@@ -749,14 +749,14 @@ const App = (function() {
       const info = getGroupInfo(group);
       const groupVehicles = vehicles.filter(v => normalizeGroup(v.grupo) === group);
       const vehicleItems = groupVehicles.map(v => `
-        <div class="dashboard-vehicle-item">
-          <div class="dashboard-vehicle-topline">
+        <button type="button" class="dashboard-vehicle-item" onclick="App.openVehicleSummary(${v.id})" title="Abrir resumo de ${v.placa}">
+          <span class="dashboard-vehicle-topline">
             <span class="placa-badge">${v.placa}</span>
             <span class="badge ${badgeClass(v.status)}"><span class="status-dot"></span>${v.status || 'ATIVO'}</span>
-          </div>
+          </span>
           <strong>${v.marca || ''} ${v.modelo || ''}</strong>
           <span class="dashboard-vehicle-km">${(v.hodometro || 0).toLocaleString('pt-BR')} km no hodômetro</span>
-        </div>
+        </button>
       `).join('') || `<div class="dashboard-group-empty"><span>${info.icon}</span><span>Nenhum veículo cadastrado neste grupo.</span></div>`;
 
       return `
@@ -874,16 +874,6 @@ const App = (function() {
       });
     }
 
-    const emManutencao = vehicles.filter(v => (v.status || '').toUpperCase() === 'MANUTENÇÃO').length;
-    if (emManutencao > 0) {
-      alerts.push({
-        type: 'warning',
-        text: `🔧 <b>Oficina:</b> <b>${emManutencao} veículo(s)</b> encontram-se atualmente em manutenção.`,
-        action: "App.switchPage('maintenance');",
-        actionText: 'Ver Manutenções'
-      });
-    }
-
     if (alerts.length === 0) {
       banner.style.display = 'none';
       banner.innerHTML = '';
@@ -981,6 +971,104 @@ const App = (function() {
     fillForm('vehicle-form', v);
     document.getElementById('vehicle-modal-title').textContent = `Editar Veículo — ${v.placa}`;
     document.getElementById('vehicle-modal').classList.add('active');
+  }
+
+  function getOilSummary(vehicle) {
+    const currentKm = Math.max(0, parseInt(vehicle.hodometro, 10) || 0);
+    const intervalKm = 10000;
+    const kmSinceReference = currentKm % intervalKm;
+    const kmRemaining = kmSinceReference === 0 ? intervalKm : intervalKm - kmSinceReference;
+    return {
+      currentKm,
+      intervalKm,
+      kmRemaining,
+      nextKm: currentKm + kmRemaining,
+      urgent: kmRemaining <= 1000
+    };
+  }
+
+  function getVehicleMaintenanceSummary(vehicle) {
+    const records = maintenance
+      .filter(item => item.placa === vehicle.placa)
+      .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+    const openRecord = records.find(item => (item.status || '').toLowerCase() !== 'concluído');
+    const record = openRecord || records[0];
+    if (!record) {
+      return {
+        reason: 'Motivo ainda não informado nos registros de manutenção.',
+        type: 'Manutenção',
+        date: 'Data não informada',
+        workshop: 'Oficina não informada',
+        status: 'Em manutenção'
+      };
+    }
+    return {
+      reason: record.descricao || record.tipo || 'Motivo não informado',
+      type: record.tipo || 'Manutenção',
+      date: record.data ? formatDateBR(record.data) : 'Data não informada',
+      workshop: record.oficina || 'Oficina não informada',
+      status: record.status || 'Pendente'
+    };
+  }
+
+  function openVehicleSummary(id) {
+    const vehicle = vehicles.find(item => item.id === id);
+    const body = document.getElementById('vehicle-summary-body');
+    const modal = document.getElementById('vehicle-summary-modal');
+    const title = document.getElementById('vehicle-summary-title');
+    if (!vehicle || !body || !modal || !title) return;
+
+    const group = getGroupInfo(vehicle.grupo);
+    const status = (vehicle.status || 'ATIVO').toUpperCase();
+    const oil = getOilSummary(vehicle);
+    const latestKm = getUltimoLancamentoKm(vehicle.placa);
+    const maintenanceInfo = status === 'MANUTENÇÃO' ? getVehicleMaintenanceSummary(vehicle) : null;
+    const oilClass = oil.urgent ? 'warning' : 'success';
+    const oilMessage = oil.urgent ? 'Troca próxima' : 'Dentro do intervalo';
+
+    title.textContent = `${vehicle.placa} — Resumo do Veículo`;
+    body.innerHTML = `
+      <div class="vehicle-summary-heading ${group.className}">
+        <div>
+          <span class="placa-badge">${vehicle.placa}</span>
+          <h4>${vehicle.marca || ''} ${vehicle.modelo || ''}</h4>
+          <p>${group.label} · Ano ${vehicle.ano || 'não informado'}</p>
+        </div>
+        <span class="badge ${badgeClass(status)}"><span class="status-dot"></span>${vehicle.status || 'ATIVO'}</span>
+      </div>
+
+      <div class="vehicle-summary-grid">
+        <div class="vehicle-summary-stat">
+          <span>Quilometragem atual</span>
+          <strong>${oil.currentKm.toLocaleString('pt-BR')} km</strong>
+          <small>Hodômetro cadastrado</small>
+        </div>
+        <div class="vehicle-summary-stat ${oilClass}">
+          <span>Troca de óleo</span>
+          <strong>${oil.kmRemaining.toLocaleString('pt-BR')} km</strong>
+          <small>${oilMessage} · próxima aos ${oil.nextKm.toLocaleString('pt-BR')} km</small>
+        </div>
+        <div class="vehicle-summary-stat">
+          <span>Último lançamento</span>
+          <strong>${latestKm ? `${(parseInt(latestKm.km_atual, 10) || 0).toLocaleString('pt-BR')} km` : 'Nenhum'}</strong>
+          <small>${latestKm && latestKm.data ? formatDateBR(latestKm.data) : 'Ainda não registrado'}</small>
+        </div>
+      </div>
+
+      <div class="vehicle-summary-note">
+        <strong>📏 Critério da troca de óleo</strong>
+        <p>Intervalo preventivo calculado a cada 10.000 km, usando o hodômetro atual como referência.</p>
+      </div>
+
+      ${maintenanceInfo ? `
+        <div class="vehicle-summary-maintenance">
+          <div class="vehicle-summary-maintenance-title"><span>🔧</span><strong>Motivo da manutenção</strong><span class="badge danger">${maintenanceInfo.status}</span></div>
+          <p>${maintenanceInfo.reason}</p>
+          <small>${maintenanceInfo.type} · ${maintenanceInfo.date} · ${maintenanceInfo.workshop}</small>
+        </div>
+      ` : ''}
+    `;
+    modal.classList.add('active');
   }
 
   async function saveVehicle() {
@@ -2181,7 +2269,7 @@ const App = (function() {
   return {
     init,
     // Veículos
-    openVehicleModal, editVehicle, saveVehicle, deleteVehicle,
+    openVehicleModal, editVehicle, openVehicleSummary, saveVehicle, deleteVehicle,
     // Modais gerais
     openModal, closeModal, switchPage,
     // Abastecimento
