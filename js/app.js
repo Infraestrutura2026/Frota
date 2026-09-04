@@ -737,7 +737,48 @@ const App = (function() {
   // ========================
   // DASHBOARD & ALERTAS
   // ========================
+  function renderDashboardGroups() {
+    const groupsEl = document.getElementById('dashboard-groups');
+    if (!groupsEl) return;
+
+    const groupKeys = getGroupKeys(vehicles);
+    const countEl = document.getElementById('dashboard-groups-count');
+    if (countEl) countEl.textContent = `${vehicles.length} veículos · ${groupKeys.length} grupos`;
+
+    groupsEl.innerHTML = groupKeys.map(group => {
+      const info = getGroupInfo(group);
+      const groupVehicles = vehicles.filter(v => normalizeGroup(v.grupo) === group);
+      const vehicleItems = groupVehicles.map(v => `
+        <div class="dashboard-vehicle-item">
+          <div class="dashboard-vehicle-topline">
+            <span class="placa-badge">${v.placa}</span>
+            <span class="badge ${badgeClass(v.status)}"><span class="status-dot"></span>${v.status || 'ATIVO'}</span>
+          </div>
+          <strong>${v.marca || ''} ${v.modelo || ''}</strong>
+          <span class="dashboard-vehicle-km">${(v.hodometro || 0).toLocaleString('pt-BR')} km no hodômetro</span>
+        </div>
+      `).join('') || `<div class="dashboard-group-empty"><span>${info.icon}</span><span>Nenhum veículo cadastrado neste grupo.</span></div>`;
+
+      return `
+        <section class="fleet-group-module dashboard-group-module ${info.className}" aria-labelledby="dashboard-${group.toLowerCase()}-title">
+          <div class="fleet-group-header">
+            <div class="fleet-group-heading">
+              <span class="fleet-group-icon" aria-hidden="true">${info.icon}</span>
+              <div>
+                <h4 id="dashboard-${group.toLowerCase()}-title">${info.label}</h4>
+                <span>Visão rápida dos veículos</span>
+              </div>
+            </div>
+            <span class="fleet-group-count">${groupVehicles.length} veículo(s)</span>
+          </div>
+          <div class="dashboard-vehicle-list">${vehicleItems}</div>
+        </section>
+      `;
+    }).join('');
+  }
+
   function renderDashboard() {
+    renderDashboardGroups();
     const total = vehicles.length;
     const active = vehicles.filter(v => (v.status || '').toUpperCase() === 'ATIVO').length;
     const maint = vehicles.filter(v => (v.status || '').toUpperCase() === 'MANUTENÇÃO').length;
@@ -768,7 +809,6 @@ const App = (function() {
     document.getElementById('kpi-maintenance').textContent = maint;
     document.getElementById('kpi-fuel-month').textContent = 'R$ ' + fuelMonth.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     document.getElementById('kpi-km-month').textContent = kmMonth.toLocaleString('pt-BR') + ' km';
-    document.getElementById('kpi-drivers').textContent = drivers.length;
 
     // Atualiza Barra de Disponibilidade da Frota
     const activePct = total > 0 ? Math.round((active / total) * 100) : 0;

@@ -1980,6 +1980,130 @@ select.form-control {
   }
 }
 
+/* ========== DASHBOARD — MÓDULOS POR GRUPO ========== */
+.dashboard-fleet-groups {
+  margin-bottom: 24px;
+}
+.dashboard-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 0 2px;
+}
+.section-eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+}
+.dashboard-section-heading h3 {
+  color: #173d5b;
+  font-size: 18px;
+  font-weight: 800;
+}
+.section-count {
+  color: #617b8e;
+  font-size: 12px;
+  font-weight: 700;
+}
+.dashboard-group-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.dashboard-group-module {
+  min-width: 0;
+}
+.dashboard-group-module.group-s4,
+.dashboard-group-module.group-other {
+  grid-column: 1 / -1;
+}
+.dashboard-vehicle-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 9px;
+  padding: 14px;
+}
+.dashboard-vehicle-item {
+  min-width: 0;
+  padding: 10px;
+  background: #f8fbfd;
+  border: 1px solid #dce8ef;
+  border-radius: 9px;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.dashboard-vehicle-item:hover {
+  background: var(--group-soft);
+  border-color: var(--group-border);
+  transform: translateY(-1px);
+}
+.dashboard-vehicle-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.dashboard-vehicle-topline .placa-badge {
+  padding-left: 6px;
+  padding-right: 6px;
+  font-size: 11px;
+}
+.dashboard-vehicle-topline .badge {
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dashboard-vehicle-item strong {
+  display: block;
+  overflow: hidden;
+  color: #23445f;
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dashboard-vehicle-km {
+  display: block;
+  margin-top: 4px;
+  color: #71869a;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.dashboard-group-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  grid-column: 1 / -1;
+  padding: 18px;
+  color: #71869a;
+  font-size: 12px;
+  font-weight: 600;
+}
+.dashboard-group-empty span:first-child {
+  font-size: 24px;
+}
+
+@media (max-width: 768px) {
+  .dashboard-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .dashboard-group-grid {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-group-module.group-s4,
+  .dashboard-group-module.group-other {
+    grid-column: auto;
+  }
+}
+
 /* ========== RESPONSIVIDADE ========== */
 @media (max-width: 768px) {
   .login-body {

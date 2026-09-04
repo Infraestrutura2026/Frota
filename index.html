@@ -200,11 +200,6 @@
           <div class="kpi-value" id="kpi-km-month">0</div>
           <div class="kpi-label">KM Rodados Mês</div>
         </div>
-        <div class="kpi-card success">
-          <div class="kpi-icon">👤</div>
-          <div class="kpi-value" id="kpi-drivers">0</div>
-          <div class="kpi-label">Motoristas</div>
-        </div>
       </div>
 
       <!-- Barra de Disponibilidade Operacional da Frota -->
@@ -226,6 +221,19 @@
           </div>
         </div>
       </div>
+
+      <section class="dashboard-fleet-groups" aria-labelledby="dashboard-groups-title">
+        <div class="dashboard-section-heading">
+          <div>
+            <span class="section-eyebrow">VISÃO DA FROTA</span>
+            <h3 id="dashboard-groups-title">Veículos por Grupo</h3>
+          </div>
+          <span id="dashboard-groups-count" class="section-count">29 veículos cadastrados</span>
+        </div>
+        <div id="dashboard-groups" class="dashboard-group-grid" aria-live="polite">
+          <div class="empty-state"><div class="empty-icon">🚗</div><h4>Carregando grupos...</h4></div>
+        </div>
+      </section>
 
       <div class="dashboard-grid">
         <div class="card">
