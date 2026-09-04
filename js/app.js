@@ -305,16 +305,11 @@ const App = (function() {
     const btnImport = document.getElementById('btn-import');
     if (btnImport) btnImport.addEventListener('click', doImport);
 
-    // Auto-preenchimento
+    // Auto-preenchimento do KM anterior a partir do último lançamento do veículo
     const kPlaca = document.getElementById('k-placa');
     if (kPlaca) {
       kPlaca.addEventListener('change', function() {
-        const v = vehicles.find(x => x.placa === this.value);
-        if (v && !editingKm) {
-          const antEl = document.getElementById('k-kmAnterior');
-          if (antEl) antEl.value = v.hodometro || 0;
-          updateKmDif();
-        }
+        if (!editingKm) preencherKmAnteriorAutomatico(this.value);
       });
     }
 
@@ -348,6 +343,33 @@ const App = (function() {
         }
       });
     }
+  }
+
+  function getUltimoLancamentoKm(placa, excluirId = null) {
+    return km
+      .map((registro, indice) => ({ registro, indice }))
+      .filter(({ registro }) => registro.placa === placa && registro.id !== excluirId)
+      .sort((a, b) => {
+        // O ID representa a ordem de lançamento tanto no servidor quanto no modo local.
+        const idA = Number(a.registro.id) || 0;
+        const idB = Number(b.registro.id) || 0;
+        if (idA !== idB) return idB - idA;
+        return b.indice - a.indice;
+      })[0]?.registro || null;
+  }
+
+  function preencherKmAnteriorAutomatico(placa) {
+    const antEl = document.getElementById('k-kmAnterior');
+    if (!antEl) return;
+
+    const ultimo = getUltimoLancamentoKm(placa);
+    const veiculo = vehicles.find(v => v.placa === placa);
+    const kmBase = ultimo
+      ? parseInt(ultimo.km_atual, 10) || 0
+      : (veiculo ? parseInt(veiculo.hodometro, 10) || 0 : 0);
+
+    antEl.value = kmBase;
+    updateKmDif();
   }
 
   function updateKmDif() {
@@ -661,7 +683,7 @@ const App = (function() {
   }
 
   function populateDriverSelects() {
-    const selects = ['f-motorista', 'k-motorista'];
+    const selects = ['f-motorista'];
     selects.forEach(id => {
       const sel = document.getElementById(id);
       if (!sel) return;
@@ -1131,7 +1153,6 @@ const App = (function() {
     const k = km.find(x => x.id === id);
     if (!k) return;
     populateVehicleSelects();
-    populateDriverSelects();
     fillForm('km-form', k);
     document.getElementById('k-id').value = k.id;
     document.getElementById('km-modal-title').textContent = `Editar Quilometragem — ${k.placa}`;
@@ -1157,7 +1178,6 @@ const App = (function() {
       placa: data.placa,
       km_anterior: kmAnt,
       km_atual: kmAtu,
-      motorista: data.motorista,
       observacao: data.observacao
     };
 
@@ -1959,7 +1979,6 @@ const App = (function() {
       document.getElementById('k-id').value = '';
       document.getElementById('k-data').value = hoje;
       populateVehicleSelects();
-      populateDriverSelects();
       updateKmDif();
     } else if (id === 'driver-modal') {
       editingDriver = null;
