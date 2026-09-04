@@ -1122,7 +1122,7 @@ const App = (function() {
   }
 
   // ========================
-  // MÓDULO: QUILOMETRAGEM / VIAGENS
+  // MÓDULO: QUILOMETRAGEM
   // ========================
   function renderKm() {
     const tbody = document.getElementById('km-table');
