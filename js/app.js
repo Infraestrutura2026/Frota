@@ -524,7 +524,7 @@ const App = (function() {
       vehicles: 'Cadastro e Controle de Veículos',
       fueling: 'Histórico de Abastecimentos',
       maintenance: 'Ordens de Manutenção',
-      km: 'Controle de Quilometragem / Viagens',
+      km: 'Controle de Quilometragem',
       drivers: 'Quadro de Condutores / Motoristas',
       reports: 'Relatórios Gerenciais e Estatísticas',
       import: 'Importação de Dados da Frota',
@@ -1140,7 +1140,7 @@ const App = (function() {
           <td><b>${k.motorista || '-'}</b></td>
           <td><small style="color:var(--text-muted);">${k.observacao || '-'}</small></td>
           <td>
-            <button class="btn btn-sm btn-primary" title="Editar Viagem / KM" onclick="App.editKm(${k.id})">✏️</button>
+            <button class="btn btn-sm btn-primary" title="Editar Quilometragem" onclick="App.editKm(${k.id})">✏️</button>
             <button class="btn btn-sm btn-danger" title="Excluir Lançamento" onclick="App.deleteKm(${k.id})">🗑️</button>
           </td>
         </tr>
@@ -1203,7 +1203,7 @@ const App = (function() {
     renderKm();
     renderVehicles();
     renderDashboard();
-    showToast('Quilometragem / Viagem registrada com sucesso!', 'success');
+    showToast('Quilometragem registrada com sucesso!', 'success');
   }
 
   async function deleteKm(id) {
@@ -1974,7 +1974,7 @@ const App = (function() {
       populateVehicleSelects();
     } else if (id === 'km-modal') {
       editingKm = null;
-      document.getElementById('km-modal-title').textContent = 'Registrar Quilometragem / Viagem';
+      document.getElementById('km-modal-title').textContent = 'Registrar Quilometragem';
       document.getElementById('km-form').reset();
       document.getElementById('k-id').value = '';
       document.getElementById('k-data').value = hoje;

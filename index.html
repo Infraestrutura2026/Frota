@@ -166,7 +166,7 @@
     <div id="page-dashboard" class="page-section active">
       <!-- Quick Actions -->
       <div class="quick-actions">
-        <button type="button" class="quick-btn" onclick="App.openModal('km-modal')">📍 Registrar KM / Viagem</button>
+        <button type="button" class="quick-btn" onclick="App.openModal('km-modal')">📍 Registrar Quilometragem</button>
         <button type="button" class="quick-btn" onclick="App.openModal('maintenance-modal')">🔧 Registrar Manutenção</button>
         <button type="button" class="quick-btn" onclick="App.openVehicleModal()">🚗 + Novo Veículo</button>
       </div>
@@ -620,7 +620,7 @@
 <!-- Modal KM -->
 <div class="modal-overlay" id="km-modal">
   <div class="modal">
-    <div class="modal-header"><h3 id="km-modal-title">Registrar Quilometragem / Viagem</h3><button type="button" class="modal-close" onclick="App.closeModal('km-modal')">&times;</button></div>
+    <div class="modal-header"><h3 id="km-modal-title">Registrar Quilometragem</h3><button type="button" class="modal-close" onclick="App.closeModal('km-modal')">&times;</button></div>
     <div class="modal-body">
       <form id="km-form" onsubmit="return false;">
         <input type="hidden" name="id" id="k-id">
