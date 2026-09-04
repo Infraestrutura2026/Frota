@@ -783,32 +783,6 @@ const App = (function() {
     const active = vehicles.filter(v => (v.status || '').toUpperCase() === 'ATIVO').length;
     const maint = vehicles.filter(v => (v.status || '').toUpperCase() === 'MANUTENÇÃO').length;
 
-    const now = new Date();
-    const curMonth = now.getMonth();
-    const curYear = now.getFullYear();
-
-    const thisMonthFuel = fueling.filter(f => {
-      if (!f.data) return false;
-      const d = new Date(f.data);
-      return d.getMonth() === curMonth && d.getFullYear() === curYear;
-    });
-    const fuelMonth = thisMonthFuel.reduce((s, f) => s + (parseFloat(f.valor) || 0), 0);
-
-    const thisMonthKm = km.filter(k => {
-      if (!k.data) return false;
-      const d = new Date(k.data);
-      return d.getMonth() === curMonth && d.getFullYear() === curYear;
-    });
-    const kmMonth = thisMonthKm.reduce((s, k) => {
-      const diff = (parseInt(k.km_atual) || 0) - (parseInt(k.km_anterior) || 0);
-      return s + (diff > 0 ? diff : 0);
-    }, 0);
-
-    document.getElementById('kpi-total').textContent = total;
-    document.getElementById('kpi-active').textContent = active;
-    document.getElementById('kpi-maintenance').textContent = maint;
-    document.getElementById('kpi-fuel-month').textContent = 'R$ ' + fuelMonth.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    document.getElementById('kpi-km-month').textContent = kmMonth.toLocaleString('pt-BR') + ' km';
 
     // Atualiza Barra de Disponibilidade da Frota
     const activePct = total > 0 ? Math.round((active / total) * 100) : 0;
