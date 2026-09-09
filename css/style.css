@@ -200,6 +200,16 @@ body {
 #btn-toggle-sidebar { display: none; }
 
 .topbar-user { display: flex; align-items: center; gap: 10px; }
+
+.conn-status {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.conn-status.conn-on { background: var(--success-soft); color: var(--success); }
+.conn-status.conn-off { background: var(--warning-soft); color: var(--warning); }
 .user-avatar {
   width: 34px; height: 34px; border-radius: 50%;
   background: var(--primary-soft);
@@ -434,6 +444,7 @@ body {
   animation: toast-in .25s ease;
 }
 .toast-msg.success { border-left: 4px solid var(--success); }
+.toast-msg.aviso { border-left: 4px solid var(--warning); }
 
 @keyframes toast-in {
   from { transform: translateY(12px); opacity: 0; }
