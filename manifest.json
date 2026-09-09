@@ -1,8 +1,19 @@
 {
-  "name": "Frota Pro",
+  "name": "Gestão de Frota",
   "short_name": "Frota",
+  "description": "Sistema interno de gestão de frota do Núcleo de Infraestrutura e Logística",
+  "lang": "pt-BR",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#f5f9fc",
-  "theme_color": "#0f172a"
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "images/brasao-policia-penal.png",
+      "sizes": "448x448",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
 }

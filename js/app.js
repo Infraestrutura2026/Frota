@@ -97,7 +97,13 @@ const App = (function() {
   function bind(){
     document.getElementById('login-form').addEventListener('submit',e=>{e.preventDefault();login();});
     const tp=document.getElementById('toggle-login-password');
-    if(tp) tp.addEventListener('click',()=>{const p=document.getElementById('login-pass');p.type=p.type==='text'?'password':'text';});
+    if(tp) tp.addEventListener('click',()=>{
+      const p=document.getElementById('login-pass');
+      const visible=p.type==='text';
+      p.type=visible?'password':'text';
+      tp.textContent=visible?'Mostrar':'Ocultar';
+      tp.setAttribute('aria-label',visible?'Mostrar senha':'Ocultar senha');
+    });
     document.getElementById('btn-logout').addEventListener('click',logout);
     document.getElementById('btn-toggle-sidebar').addEventListener('click',()=>document.getElementById('sidebar').classList.toggle('open'));
     document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>{ page(el.dataset.page); document.getElementById('sidebar').classList.remove('open'); }));
@@ -164,7 +170,7 @@ const App = (function() {
     document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
     const t=document.getElementById('page-'+p); if(t)t.classList.add('active');
     const nv=document.querySelector(`.nav-item[data-page="${p}"]`); if(nv)nv.classList.add('active');
-    document.getElementById('page-title').textContent=p==='dashboard'?'Painel Geral — Frota Pro':'Cadastro de Veículos';
+    document.getElementById('page-title').textContent=p==='dashboard'?'Painel Geral':'Cadastro de Veículos';
     if(p==='dashboard')renderDashboard(); if(p==='vehicles')renderVehicles();
   }
 

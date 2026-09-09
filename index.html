@@ -3,87 +3,96 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Frota Pro — Controle de Frota</title>
-  <meta name="description" content="Sistema de controle de frota — grupos S2, S3 e S4">
+  <title>Gestão de Frota — Núcleo de Infraestrutura e Logística</title>
+  <meta name="description" content="Sistema interno de gestão de frota do Núcleo de Infraestrutura e Logística">
   <meta name="theme-color" content="#0f172a">
   <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="images/brasao-policia-penal.png">
+  <link rel="apple-touch-icon" href="images/brasao-policia-penal.png">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
   <!-- ================= TELA DE LOGIN ================= -->
-  <div class="login-screen" id="login-screen" style="display:grid">
-    <form class="login-card" id="login-form" autocomplete="off">
-      <div class="login-brand">
-        <span class="login-logo">🚛</span>
-        <h1>Frota Pro</h1>
-        <p>Sistema de Controle de Frota</p>
+  <div class="login-screen" id="login-screen" style="display:grid" aria-label="Acesso ao sistema">
+    <section class="login-brand-panel" aria-label="Identificação do sistema">
+      <img src="images/brasao-policia-penal.png" alt="" class="login-watermark" aria-hidden="true">
+      <div class="login-brand-copy">
+        <h1>Gestão de Frota</h1>
+        <p>Núcleo de Infraestrutura e Logística</p>
       </div>
+    </section>
 
-      <div class="login-alert" id="login-alert" role="alert"></div>
+    <div class="login-form-panel">
+      <form class="login-card" id="login-form" autocomplete="off">
+        <h2>Acesse com sua conta</h2>
 
-      <label class="login-field">
-        <span>Usuário</span>
-        <input type="text" id="login-user" placeholder="Digite seu usuário" autocomplete="username" required>
-      </label>
+        <div class="login-alert" id="login-alert" role="alert"></div>
 
-      <label class="login-field">
-        <span>Senha</span>
-        <div class="password-wrap">
-          <input type="password" id="login-pass" placeholder="Digite sua senha" autocomplete="current-password" required>
-          <button type="button" id="toggle-login-password" title="Mostrar/ocultar senha">👁️</button>
-        </div>
-      </label>
+        <label class="login-field">
+          <span>Usuário ou e-mail</span>
+          <input type="text" id="login-user" placeholder="Digite seu usuário" autocomplete="username" required>
+        </label>
 
-      <button type="submit" class="btn btn-primary btn-block">Entrar</button>
-    </form>
+        <label class="login-field">
+          <span>Senha</span>
+          <div class="password-wrap">
+            <input type="password" id="login-pass" placeholder="Digite sua senha" autocomplete="current-password" required>
+            <button type="button" id="toggle-login-password" aria-label="Mostrar senha">Mostrar</button>
+          </div>
+        </label>
+
+        <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+      </form>
+    </div>
   </div>
 
   <!-- ================= APLICAÇÃO ================= -->
   <div class="app-screen" id="app-screen" style="display:none">
-
-    <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-brand">
-        <span class="sidebar-logo">🚛</span>
+        <span class="sidebar-monogram" aria-hidden="true">GF</span>
         <div>
-          <strong>Frota Pro</strong>
-          <small>v3.2</small>
+          <strong>Gestão de Frota</strong>
+          <small>Núcleo de Infraestrutura e Logística</small>
         </div>
       </div>
-      <nav class="sidebar-nav">
+
+      <nav class="sidebar-nav" aria-label="Navegação principal">
         <button type="button" class="nav-item active" data-page="dashboard">
-          <span class="nav-icon">📊</span> Painel Geral
+          <span class="nav-icon" aria-hidden="true">▦</span> Painel Geral
         </button>
         <button type="button" class="nav-item" data-page="vehicles">
-          <span class="nav-icon">🚗</span> Veículos
+          <span class="nav-icon" aria-hidden="true">▤</span> Veículos
         </button>
       </nav>
+
       <div class="sidebar-footer">
-        <small>Controle de Frota</small>
+        <small>Gestão de Frota</small>
       </div>
     </aside>
 
-    <!-- Área principal -->
     <div class="main-area">
       <header class="topbar">
-        <button type="button" class="btn btn-icon" id="btn-toggle-sidebar" title="Menu">☰</button>
-        <h2 id="page-title">Painel Geral — Frota Pro</h2>
+        <button type="button" class="btn btn-icon" id="btn-toggle-sidebar" title="Abrir menu" aria-label="Abrir menu">☰</button>
+        <h2 id="page-title">Painel Geral</h2>
         <span class="conn-status conn-off" id="conn-status" title="Status da conexão com a API">● Offline</span>
         <div class="topbar-user">
-          <span class="user-avatar">👤</span>
-          <span class="user-name-text" id="user-name">Admin</span>
-          <button type="button" class="btn btn-sm btn-danger" id="btn-logout">Sair</button>
+          <span class="user-avatar" aria-hidden="true">U</span>
+          <span class="user-name-text" id="user-name">Usuário</span>
+          <button type="button" class="btn btn-sm btn-logout" id="btn-logout">Sair</button>
         </div>
       </header>
 
       <main class="content">
-
         <!-- ===== Página: Dashboard ===== -->
         <section class="page-section active" id="page-dashboard">
           <div class="card availability-card">
             <div class="availability-head">
-              <h3>Disponibilidade da Frota</h3>
+              <div>
+                <span class="section-kicker">Acompanhamento</span>
+                <h3>Disponibilidade da Frota</h3>
+              </div>
               <p class="availability-pct" id="fleet-availability-pct">—</p>
             </div>
             <div class="progress-bar" aria-hidden="true">
@@ -99,7 +108,10 @@
           </div>
 
           <div class="section-head">
-            <h3>Grupos da Frota</h3>
+            <div>
+              <span class="section-kicker">Organização operacional</span>
+              <h3>Grupos da Frota</h3>
+            </div>
             <span class="section-count" id="dashboard-groups-count">—</span>
           </div>
           <div class="dashboard-groups" id="dashboard-groups"></div>
@@ -108,8 +120,8 @@
         <!-- ===== Página: Veículos ===== -->
         <section class="page-section" id="page-vehicles">
           <div class="vehicles-toolbar card">
-            <input type="search" id="vehicle-search" placeholder="🔍 Buscar por placa, marca ou modelo...">
-            <select id="vehicle-status-filter">
+            <input type="search" id="vehicle-search" placeholder="Buscar por placa, marca ou modelo…" aria-label="Buscar veículo">
+            <select id="vehicle-status-filter" aria-label="Filtrar veículos por status">
               <option value="">Todos os status</option>
               <option value="ATIVO">ATIVO</option>
               <option value="MANUTENÇÃO">MANUTENÇÃO</option>
@@ -121,7 +133,6 @@
           </div>
           <div class="vehicles-groups" id="vehicles-groups"></div>
         </section>
-
       </main>
     </div>
   </div>
@@ -132,7 +143,7 @@
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="vehicle-modal-title">
       <div class="modal-header">
         <h3 id="vehicle-modal-title">Novo Veículo</h3>
-        <button type="button" class="btn btn-icon" title="Fechar" onclick="App.closeModal('vehicle-modal')">✕</button>
+        <button type="button" class="btn btn-icon" title="Fechar" aria-label="Fechar" onclick="App.closeModal('vehicle-modal')">✕</button>
       </div>
       <form id="vehicle-form" onsubmit="event.preventDefault(); App.saveVehicle();">
         <div class="form-grid">
@@ -194,13 +205,12 @@
         </div>
         <div class="modal-actions">
           <button type="button" class="btn" onclick="App.closeModal('vehicle-modal')">Cancelar</button>
-          <button type="submit" class="btn btn-primary">💾 Salvar</button>
+          <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- Toasts -->
   <div id="toast-container" aria-live="polite"></div>
 
   <script src="js/config.js"></script>
