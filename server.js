@@ -54,7 +54,11 @@ function loadDatabase() {
 }
 
 let db = loadDatabase();
-function saveDatabase() { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
+function saveDatabase() {
+  // Na Vercel o filesystem é somente leitura: a falha é ignorada.
+  try { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); return true; }
+  catch { return false; }
+}
 
 function json(res, code, data) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
@@ -123,4 +127,10 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, HOST, () => console.log(` FROTA PRO v3.2 — http://${HOST}:${PORT}`));
+// Execução local: node server.js
+if (require.main === module) {
+  server.listen(PORT, HOST, () => console.log(` FROTA PRO v3.2 — http://${HOST}:${PORT}`));
+}
+
+// Exporta o handler para execução serverless (Vercel)
+module.exports = (req, res) => server.emit('request', req, res);
