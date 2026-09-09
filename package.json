@@ -1,20 +1,14 @@
 {
-  "name": "frota",
-  "version": "1.0.0",
-  "description": "Sistema interno de controle de frota de veículos – Polícia Penal do Estado de São Paulo",
+  "name": "frota-pro",
+  "version": "3.2.0",
+  "description": "Sistema de controle de frota — grupos S2, S3 e S4",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
   },
-  "keywords": [
-    "frota",
-    "veiculos",
-    "policia-penal",
-    "sp"
-  ],
   "license": "MIT",
   "dependencies": {
-    "express": "^4.21.2"
+    "@neondatabase/serverless": "^1.1.0"
   }
 }

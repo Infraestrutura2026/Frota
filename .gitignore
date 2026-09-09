@@ -1,17 +1,6 @@
-# Dependências
 node_modules/
-
-# Deploy
-.vercel/
-
-# Ambiente
 .env
-.env.*
-
-# Sistema
-.DS_Store
-Thumbs.db
+.env.local
+.vercel
 *.log
-
-# Rascunhos/busca de imagens
-image-search/
+.DS_Store
