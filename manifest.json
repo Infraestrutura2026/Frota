@@ -1,0 +1,19 @@
+{
+  "name": "Controle de Frota – Polícia Penal SP",
+  "short_name": "Frota SP",
+  "description": "Sistema interno de controle de frota de veículos da Polícia Penal do Estado de São Paulo",
+  "lang": "pt-BR",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a1f44",
+  "theme_color": "#0a1f44",
+  "icons": [
+    {
+      "src": "images/brasao-policia-penal-sp.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

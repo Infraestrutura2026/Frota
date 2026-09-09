@@ -1,0 +1,100 @@
+{
+  "veiculos": [
+    {
+      "id": 1,
+      "placa": "BRA2E19",
+      "modelo": "Chevrolet Onix",
+      "tipo": "Sedan",
+      "ano": 2022,
+      "setor": "Segurança e Escolta",
+      "motorista": "Antônio Silva",
+      "status": "Disponível",
+      "km": 38500,
+      "observacoes": ""
+    },
+    {
+      "id": 2,
+      "placa": "FZT3A88",
+      "modelo": "Fiat Cronos",
+      "tipo": "Sedan",
+      "ano": 2021,
+      "setor": "Administração",
+      "motorista": "Maria Souza",
+      "status": "Em uso",
+      "km": 52100,
+      "observacoes": "Em diligência administrativa até sexta-feira."
+    },
+    {
+      "id": 3,
+      "placa": "QWE5D41",
+      "modelo": "Toyota Hilux",
+      "tipo": "Pickup",
+      "ano": 2023,
+      "setor": "Infraestrutura",
+      "motorista": "Carlos Pereira",
+      "status": "Disponível",
+      "km": 27400,
+      "observacoes": ""
+    },
+    {
+      "id": 4,
+      "placa": "KLM7B22",
+      "modelo": "Volkswagen Spin",
+      "tipo": "Van",
+      "ano": 2020,
+      "setor": "Transporte de Presos",
+      "motorista": "João Santos",
+      "status": "Manutenção",
+      "km": 98300,
+      "observacoes": "Revisão de freios agendada para 12/09/2026."
+    },
+    {
+      "id": 5,
+      "placa": "HJU9C63",
+      "modelo": "Renault Duster",
+      "tipo": "SUV",
+      "ano": 2022,
+      "setor": "Supervisão Regional",
+      "motorista": "",
+      "status": "Disponível",
+      "km": 31200,
+      "observacoes": ""
+    },
+    {
+      "id": 6,
+      "placa": "VBN4F10",
+      "modelo": "Ford Ranger",
+      "tipo": "Pickup",
+      "ano": 2019,
+      "setor": "Manutenção Predial",
+      "motorista": "",
+      "status": "Indisponível",
+      "km": 120500,
+      "observacoes": "Aguardando peças de reposição."
+    },
+    {
+      "id": 7,
+      "placa": "ASD6G74",
+      "modelo": "Honda CG 160",
+      "tipo": "Moto",
+      "ano": 2023,
+      "setor": "Ronda",
+      "motorista": "Pedro Almeida",
+      "status": "Em uso",
+      "km": 8900,
+      "observacoes": ""
+    },
+    {
+      "id": 8,
+      "placa": "MNB8H35",
+      "modelo": "Volkswagen Saveiro",
+      "tipo": "Pickup",
+      "ano": 2021,
+      "setor": "Almoxarifado",
+      "motorista": "",
+      "status": "Manutenção",
+      "km": 67800,
+      "observacoes": "Troca de pneus traseiros."
+    }
+  ]
+}

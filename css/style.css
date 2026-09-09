@@ -1,0 +1,418 @@
+/* ============================================
+   Controle de Frota – Polícia Penal do Estado de São Paulo
+   Folha de estilos principal
+   ============================================ */
+
+:root {
+  --azul-escuro: #0a1f44;
+  --azul-medio: #123a7a;
+  --dourado: #c9a227;
+  --dourado-claro: #e5c55a;
+  --fundo: #eef1f6;
+  --cartao: #ffffff;
+  --texto: #1c2b3a;
+  --texto-suave: #5b6b7d;
+  --borda: #d9e0ea;
+  --verde: #1e7a43;
+  --azul: #1d6fb8;
+  --ambar: #b57e10;
+  --vermelho: #b3261e;
+  --sombra: 0 2px 8px rgba(10, 31, 68, 0.08);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif;
+  background: var(--fundo);
+  color: var(--texto);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Cabeçalho ---------- */
+
+.cabecalho {
+  background: linear-gradient(135deg, var(--azul-escuro) 0%, var(--azul-medio) 100%);
+  border-bottom: 4px solid var(--dourado);
+  color: #fff;
+}
+
+.cabecalho-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.brasao {
+  height: 62px;
+  width: auto;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+}
+
+.cabecalho-texto h1 {
+  font-size: 1.5rem;
+  letter-spacing: 0.4px;
+}
+
+.cabecalho-texto p {
+  color: var(--dourado-claro);
+  font-size: 0.92rem;
+}
+
+/* ---------- Conteúdo principal ---------- */
+
+.container {
+  flex: 1;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+
+/* Cartões de estatísticas */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.cartao {
+  background: var(--cartao);
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: var(--sombra);
+  border-left: 5px solid var(--azul-medio);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cartao.total { border-left-color: var(--azul-medio); }
+.cartao.disponiveis { border-left-color: var(--verde); }
+.cartao.emuso { border-left-color: var(--azul); }
+.cartao.manutencao { border-left-color: var(--ambar); }
+
+.cartao .numero {
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: var(--azul-escuro);
+}
+
+.cartao .rotulo {
+  font-size: 0.82rem;
+  color: var(--texto-suave);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Painel da tabela */
+
+.painel {
+  background: var(--cartao);
+  border-radius: 12px;
+  box-shadow: var(--sombra);
+  padding: 20px;
+}
+
+.painel-topo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.painel-topo h2 {
+  font-size: 1.15rem;
+  color: var(--azul-escuro);
+}
+
+.controles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.controles input[type="search"],
+.controles select {
+  padding: 9px 12px;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: #fff;
+  color: var(--texto);
+  min-width: 190px;
+}
+
+.controles input[type="search"]:focus,
+.controles select:focus {
+  outline: 2px solid var(--dourado);
+  border-color: transparent;
+}
+
+/* Tabela */
+
+.tabela-wrapper { overflow-x: auto; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  min-width: 860px;
+}
+
+thead th {
+  background: var(--azul-escuro);
+  color: #fff;
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--borda);
+  vertical-align: middle;
+}
+
+tbody tr:hover { background: #f5f8fc; }
+
+td.placa {
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 1px;
+  color: var(--azul-escuro);
+  white-space: nowrap;
+}
+
+td.km {
+  white-space: nowrap;
+  color: var(--texto-suave);
+}
+
+.col-acoes {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Badges de status */
+
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-verde { background: #e3f4e9; color: var(--verde); }
+.badge-azul { background: #e3eefb; color: var(--azul); }
+.badge-ambar { background: #fcf1d8; color: var(--ambar); }
+.badge-vermelho { background: #fbe6e4; color: var(--vermelho); }
+
+/* Botões */
+
+.btn {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.05s;
+}
+
+.btn:active { transform: scale(0.98); }
+
+.btn-primario {
+  background: var(--azul-escuro);
+  color: #fff;
+}
+
+.btn-primario:hover { background: var(--azul-medio); }
+
+.btn-secundario {
+  background: transparent;
+  color: var(--texto-suave);
+  border: 1px solid var(--borda);
+}
+
+.btn-secundario:hover { background: var(--fundo); }
+
+.btn-icone {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.btn-icone:hover { background: var(--fundo); }
+
+.vazio {
+  text-align: center;
+  color: var(--texto-suave);
+  padding: 24px 0;
+}
+
+/* ---------- Modal ---------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 31, 68, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 50;
+}
+
+.modal[hidden] { display: none; }
+
+.modal-caixa {
+  background: #fff;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 620px;
+  max-height: 92vh;
+  overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+.modal-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--borda);
+  position: sticky;
+  top: 0;
+  background: #fff;
+}
+
+.modal-topo h3 { color: var(--azul-escuro); }
+
+.fechar {
+  background: none;
+  border: none;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--texto-suave);
+  padding: 0 4px;
+}
+
+.fechar:hover { color: var(--vermelho); }
+
+#form-veiculo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding: 18px 20px 20px;
+}
+
+.campo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.campo-largo { grid-column: 1 / -1; }
+
+.campo label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--texto-suave);
+}
+
+.campo input,
+.campo select,
+.campo textarea {
+  padding: 9px 12px;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: #fff;
+  color: var(--texto);
+}
+
+.campo input:focus,
+.campo select:focus,
+.campo textarea:focus {
+  outline: 2px solid var(--dourado);
+  border-color: transparent;
+}
+
+.modal-acoes {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* ---------- Toast ---------- */
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: var(--azul-escuro);
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  opacity: 0;
+  transition: all 0.25s ease;
+  z-index: 60;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  max-width: 90vw;
+  text-align: center;
+}
+
+.toast.visivel {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.toast-sucesso { background: var(--verde); }
+.toast-erro { background: var(--vermelho); }
+.toast-aviso { background: var(--ambar); }
+
+/* ---------- Rodapé ---------- */
+
+.rodape {
+  background: var(--azul-escuro);
+  color: #cfd8e6;
+  text-align: center;
+  font-size: 0.8rem;
+  padding: 14px 20px;
+}
+
+/* ---------- Responsivo ---------- */
+
+@media (max-width: 768px) {
+  .cabecalho-inner { gap: 12px; padding: 14px 16px; }
+  .brasao { height: 48px; }
+  .cabecalho-texto h1 { font-size: 1.2rem; }
+  #form-veiculo { grid-template-columns: 1fr; }
+  .controles { width: 100%; }
+  .controles input[type="search"] { flex: 1; min-width: 0; }
+}

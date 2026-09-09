@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Controle de Frota – Polícia Penal SP</title>
+  <meta name="description" content="Sistema interno de controle de frota de veículos da Polícia Penal do Estado de São Paulo" />
+  <meta name="theme-color" content="#0a1f44" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" href="images/brasao-policia-penal-sp.png" />
+  <link rel="apple-touch-icon" href="images/brasao-policia-penal-sp.png" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <header class="cabecalho">
+    <div class="cabecalho-inner">
+      <img src="images/brasao-policia-penal-sp.png" alt="Brasão da Polícia Penal do Estado de São Paulo" class="brasao" />
+      <div class="cabecalho-texto">
+        <h1>Controle de Frota</h1>
+        <p>Polícia Penal do Estado de São Paulo</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Cartões de estatísticas -->
+    <section class="cards" aria-label="Estatísticas da frota">
+      <div class="cartao total">
+        <span class="numero" id="stat-total">0</span>
+        <span class="rotulo">Veículos na frota</span>
+      </div>
+      <div class="cartao disponiveis">
+        <span class="numero" id="stat-disponiveis">0</span>
+        <span class="rotulo">Disponíveis</span>
+      </div>
+      <div class="cartao emuso">
+        <span class="numero" id="stat-emuso">0</span>
+        <span class="rotulo">Em uso</span>
+      </div>
+      <div class="cartao manutencao">
+        <span class="numero" id="stat-manutencao">0</span>
+        <span class="rotulo">Em manutenção</span>
+      </div>
+    </section>
+
+    <!-- Painel com a tabela da frota -->
+    <section class="painel">
+      <div class="painel-topo">
+        <h2>Veículos da Frota</h2>
+        <div class="controles">
+          <input type="search" id="busca" placeholder="Buscar por placa, modelo, setor…" aria-label="Buscar veículo" />
+          <select id="filtro-status" aria-label="Filtrar por status"></select>
+          <button id="btn-novo" class="btn btn-primario">+ Novo Veículo</button>
+        </div>
+      </div>
+
+      <div class="tabela-wrapper">
+        <table id="tabela-frota">
+          <thead>
+            <tr>
+              <th>Placa</th>
+              <th>Veículo</th>
+              <th>Tipo</th>
+              <th>Ano</th>
+              <th>Setor</th>
+              <th>Motorista</th>
+              <th>Km</th>
+              <th>Status</th>
+              <th class="col-acoes">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="corpo-tabela"></tbody>
+        </table>
+      </div>
+
+      <p id="vazio" class="vazio" hidden>Nenhum veículo encontrado para os filtros atuais.</p>
+    </section>
+
+  </main>
+
+  <!-- Modal de cadastro/edição -->
+  <div class="modal" id="modal" hidden>
+    <div class="modal-caixa" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
+      <div class="modal-topo">
+        <h3 id="modal-titulo">Novo Veículo</h3>
+        <button class="fechar" id="btn-fechar-modal" aria-label="Fechar">&times;</button>
+      </div>
+      <form id="form-veiculo" autocomplete="off">
+        <input type="hidden" id="campo-id" />
+
+        <div class="campo">
+          <label for="campo-placa">Placa *</label>
+          <input type="text" id="campo-placa" placeholder="BRA2E19" maxlength="8" required />
+        </div>
+        <div class="campo">
+          <label for="campo-modelo">Modelo *</label>
+          <input type="text" id="campo-modelo" placeholder="Ex.: Toyota Hilux" required />
+        </div>
+        <div class="campo">
+          <label for="campo-tipo">Tipo</label>
+          <select id="campo-tipo"></select>
+        </div>
+        <div class="campo">
+          <label for="campo-ano">Ano</label>
+          <input type="number" id="campo-ano" min="1990" max="2035" placeholder="2024" />
+        </div>
+        <div class="campo">
+          <label for="campo-setor">Setor</label>
+          <input type="text" id="campo-setor" placeholder="Ex.: Segurança e Escolta" />
+        </div>
+        <div class="campo">
+          <label for="campo-motorista">Motorista responsável</label>
+          <input type="text" id="campo-motorista" placeholder="Nome do condutor" />
+        </div>
+        <div class="campo">
+          <label for="campo-status">Status</label>
+          <select id="campo-status"></select>
+        </div>
+        <div class="campo">
+          <label for="campo-km">Quilometragem (km)</label>
+          <input type="number" id="campo-km" min="0" step="1" placeholder="0" />
+        </div>
+        <div class="campo campo-largo">
+          <label for="campo-obs">Observações</label>
+          <textarea id="campo-obs" rows="2" placeholder="Ocorrências, manutenções, restrições…"></textarea>
+        </div>
+
+        <div class="modal-acoes">
+          <button type="button" class="btn btn-secundario" id="btn-cancelar">Cancelar</button>
+          <button type="submit" class="btn btn-primario">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <footer class="rodape">
+    <p>© 2026 Polícia Penal do Estado de São Paulo — Sistema interno de controle de frota</p>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
