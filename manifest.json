@@ -1,0 +1,8 @@
+{
+  "name": "Frota Pro",
+  "short_name": "Frota",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f9fc",
+  "theme_color": "#0f172a"
+}

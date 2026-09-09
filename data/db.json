@@ -1,0 +1,4 @@
+{
+  "vehicles": [],
+  "users": [{"id":1,"nome":"Administrador","usuario":"admin","senha":"e6c2797fed87dd7a39f60bcfe65cf34645229671607ef506720d20d41f173b2a","role":"admin","ativo":1}]
+}
