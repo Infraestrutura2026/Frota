@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frota Pro — Controle de Frota</title>
+  <meta name="description" content="Sistema de controle de frota — grupos S2, S3 e S4">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ================= TELA DE LOGIN ================= -->
+  <div class="login-screen" id="login-screen" style="display:grid">
+    <form class="login-card" id="login-form" autocomplete="off">
+      <div class="login-brand">
+        <span class="login-logo">🚛</span>
+        <h1>Frota Pro</h1>
+        <p>Sistema de Controle de Frota</p>
+      </div>
+
+      <div class="login-alert" id="login-alert" role="alert"></div>
+
+      <label class="login-field">
+        <span>Usuário</span>
+        <input type="text" id="login-user" placeholder="Digite seu usuário" autocomplete="username" required>
+      </label>
+
+      <label class="login-field">
+        <span>Senha</span>
+        <div class="password-wrap">
+          <input type="password" id="login-pass" placeholder="Digite sua senha" autocomplete="current-password" required>
+          <button type="button" id="toggle-login-password" title="Mostrar/ocultar senha">👁️</button>
+        </div>
+      </label>
+
+      <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+    </form>
+  </div>
+
+  <!-- ================= APLICAÇÃO ================= -->
+  <div class="app-screen" id="app-screen" style="display:none">
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <span class="sidebar-logo">🚛</span>
+        <div>
+          <strong>Frota Pro</strong>
+          <small>v3.2</small>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <button type="button" class="nav-item active" data-page="dashboard">
+          <span class="nav-icon">📊</span> Painel Geral
+        </button>
+        <button type="button" class="nav-item" data-page="vehicles">
+          <span class="nav-icon">🚗</span> Veículos
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <small>Controle de Frota</small>
+      </div>
+    </aside>
+
+    <!-- Área principal -->
+    <div class="main-area">
+      <header class="topbar">
+        <button type="button" class="btn btn-icon" id="btn-toggle-sidebar" title="Menu">☰</button>
+        <h2 id="page-title">Painel Geral — Frota Pro</h2>
+        <span class="conn-status conn-off" id="conn-status" title="Status da conexão com a API">● Offline</span>
+        <div class="topbar-user">
+          <span class="user-avatar">👤</span>
+          <span class="user-name-text" id="user-name">Admin</span>
+          <button type="button" class="btn btn-sm btn-danger" id="btn-logout">Sair</button>
+        </div>
+      </header>
+
+      <main class="content">
+
+        <!-- ===== Página: Dashboard ===== -->
+        <section class="page-section active" id="page-dashboard">
+          <div class="card availability-card">
+            <div class="availability-head">
+              <h3>Disponibilidade da Frota</h3>
+              <p class="availability-pct" id="fleet-availability-pct">—</p>
+            </div>
+            <div class="progress-bar" aria-hidden="true">
+              <div class="progress-seg seg-active" id="bar-active" style="width:0%"></div>
+              <div class="progress-seg seg-maint" id="bar-maint" style="width:0%"></div>
+              <div class="progress-seg seg-other" id="bar-other" style="width:0%"></div>
+            </div>
+            <div class="progress-legend">
+              <span class="legend-item"><i class="dot dot-active"></i><span id="lbl-active">—</span></span>
+              <span class="legend-item"><i class="dot dot-maint"></i><span id="lbl-maint">—</span></span>
+              <span class="legend-item"><i class="dot dot-other"></i><span id="lbl-other">—</span></span>
+            </div>
+          </div>
+
+          <div class="section-head">
+            <h3>Grupos da Frota</h3>
+            <span class="section-count" id="dashboard-groups-count">—</span>
+          </div>
+          <div class="dashboard-groups" id="dashboard-groups"></div>
+        </section>
+
+        <!-- ===== Página: Veículos ===== -->
+        <section class="page-section" id="page-vehicles">
+          <div class="vehicles-toolbar card">
+            <input type="search" id="vehicle-search" placeholder="🔍 Buscar por placa, marca ou modelo...">
+            <select id="vehicle-status-filter">
+              <option value="">Todos os status</option>
+              <option value="ATIVO">ATIVO</option>
+              <option value="MANUTENÇÃO">MANUTENÇÃO</option>
+              <option value="ARROLAMENTO">ARROLAMENTO</option>
+              <option value="INATIVO">INATIVO</option>
+            </select>
+            <span class="vehicle-count" id="vehicle-count">—</span>
+            <button type="button" class="btn btn-primary" onclick="App.openVehicleModal()">＋ Novo Veículo</button>
+          </div>
+          <div class="vehicles-groups" id="vehicles-groups"></div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: Veículo ================= -->
+  <div class="modal" id="vehicle-modal">
+    <div class="modal-backdrop" onclick="App.closeModal('vehicle-modal')"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="vehicle-modal-title">
+      <div class="modal-header">
+        <h3 id="vehicle-modal-title">Novo Veículo</h3>
+        <button type="button" class="btn btn-icon" title="Fechar" onclick="App.closeModal('vehicle-modal')">✕</button>
+      </div>
+      <form id="vehicle-form" onsubmit="event.preventDefault(); App.saveVehicle();">
+        <div class="form-grid">
+          <label class="form-field">
+            <span>Placa *</span>
+            <input type="text" id="v-placa" name="placa" maxlength="8" placeholder="ABC1D23" required>
+          </label>
+          <label class="form-field">
+            <span>Grupo</span>
+            <select id="v-grupo" name="grupo">
+              <option value="S2">S2</option>
+              <option value="S3">S3</option>
+              <option value="S4">S4</option>
+            </select>
+          </label>
+          <label class="form-field">
+            <span>Marca</span>
+            <input type="text" id="v-marca" name="marca" placeholder="GM / CHEVROLET">
+          </label>
+          <label class="form-field">
+            <span>Modelo</span>
+            <input type="text" id="v-modelo" name="modelo" placeholder="SPIN">
+          </label>
+          <label class="form-field">
+            <span>Ano</span>
+            <input type="number" id="v-ano" name="ano" min="1950" max="2035" placeholder="2025">
+          </label>
+          <label class="form-field">
+            <span>Cor</span>
+            <input type="text" id="v-cor" name="cor" placeholder="BRANCA">
+          </label>
+          <label class="form-field">
+            <span>Hodômetro (km)</span>
+            <input type="number" id="v-hodometro" name="hodometro" min="0" placeholder="0">
+          </label>
+          <label class="form-field">
+            <span>Capacidade</span>
+            <input type="number" id="v-capacidade" name="capacidade" min="1" placeholder="5">
+          </label>
+          <label class="form-field">
+            <span>Combustível</span>
+            <select id="v-combustivel" name="combustivel">
+              <option value="">—</option>
+              <option value="GASOLINA">GASOLINA</option>
+              <option value="ETANOL">ETANOL</option>
+              <option value="FLEX">FLEX</option>
+              <option value="DIESEL">DIESEL</option>
+            </select>
+          </label>
+          <label class="form-field">
+            <span>Status</span>
+            <select id="v-status" name="status">
+              <option value="ATIVO">ATIVO</option>
+              <option value="MANUTENÇÃO">MANUTENÇÃO</option>
+              <option value="ARROLAMENTO">ARROLAMENTO</option>
+              <option value="INATIVO">INATIVO</option>
+            </select>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn" onclick="App.closeModal('vehicle-modal')">Cancelar</button>
+          <button type="submit" class="btn btn-primary">💾 Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toast-container" aria-live="polite"></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+  <script>window.addEventListener('DOMContentLoaded', function () { App.init(); });</script>
+</body>
+</html>

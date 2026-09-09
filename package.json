@@ -1,7 +1,14 @@
 {
   "name": "frota-pro",
   "version": "3.2.0",
+  "description": "Sistema de controle de frota — grupos S2, S3 e S4",
   "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "@neondatabase/serverless": "^1.1.0" }
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0"
+  }
 }

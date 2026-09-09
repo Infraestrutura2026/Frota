@@ -3,7 +3,9 @@ const App = (function() {
   let currentUser = null;
   let vehicles = [];
   let editingVehicle = null;
+  let online = false;
 
+  // Seed offline (usado só se a API estiver indisponível e não houver cache)
   const VEHICLES = [
     { id: 1, placa: 'CUQ3I89', grupo: 'S2', marca: 'GM / CHEVROLET', modelo: 'SPIN', ano: 2025, cor: 'BRANCA', hodometro: 52952, status: 'ATIVO', combustivel: 'ETANOL', capacidade: 5 },
     { id: 2, placa: 'CUW3J07', grupo: 'S2', marca: 'GM / CHEVROLET', modelo: 'SPIN', ano: 2025, cor: 'BRANCA', hodometro: 92369, status: 'ATIVO', combustivel: 'ETANOL', capacidade: 5 },
@@ -30,7 +32,7 @@ const App = (function() {
     { id: 23, placa: 'FRR1B42', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', hodometro: 259728, status: 'MANUTENÇÃO', combustivel: 'GASOLINA', capacidade: 7 },
     { id: 24, placa: 'FSH3I13', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', hodometro: 282851, status: 'MANUTENÇÃO', combustivel: 'GASOLINA', capacidade: 7 },
     { id: 25, placa: 'FSW4013', grupo: 'S4', marca: 'GM / CHEVROLET', modelo: 'S10', ano: 2015, cor: 'PRATA', hodometro: 485585, status: 'MANUTENÇÃO', combustivel: 'DIESEL', capacidade: 6 },
-    { id: 26, placa: 'FTQ3C13', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', hodometro: 213986, status: 'MANUTENÇÃO', combustivel: 'GASOLINA', capacidade: 7 },
+    { id: 26, placa: 'FTQ3C13', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'PRATA', hodometro: 213986, status: 'MANUTENÇÃO', combustivel: 'GASOLINA', capacidade: 7 },
     { id: 27, placa: 'FUW4H93', grupo: 'S4', marca: 'CAOACHERY', modelo: 'TIGGO 8 1.6 TGDI', ano: 2023, cor: 'BRANCA', hodometro: 93631, status: 'ATIVO', combustivel: 'GASOLINA', capacidade: 7 },
     { id: 28, placa: 'FYI5976', grupo: 'S4', marca: 'RENAULT', modelo: 'MASTER', ano: 2018, cor: 'BRANCA', hodometro: 140580, status: 'ATIVO', combustivel: 'DIESEL', capacidade: 4 },
     { id: 29, placa: 'GIT5825', grupo: 'S4', marca: 'MITSUBISHI', modelo: 'OUTLANDER 2.0 P', ano: 2020, cor: 'PRATA', hodometro: 233678, status: 'ATIVO', combustivel: 'GASOLINA', capacidade: 7 }
@@ -41,26 +43,40 @@ const App = (function() {
   function keys(){ const k=['S2','S3','S4']; vehicles.forEach(v=>{ const g=norm(v.grupo); if(!k.includes(g))k.push(g); }); return k; }
   function info(g){ const k=norm(g); return GROUPS[k]||{label:`Grupo ${k}`,icon:'🚗',cls:'group-other'}; }
 
-  function toast(msg){
+  function toast(msg, tipo){
     const c=document.getElementById('toast-container'); if(!c)return;
-    const t=document.createElement('div'); t.className='toast-msg success';
-    t.innerHTML=`<span>✅</span><span>${msg}</span>`;
-    c.appendChild(t); setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3000);
+    const t=document.createElement('div'); t.className='toast-msg '+ (tipo==='aviso'?'aviso':'success');
+    t.innerHTML=`<span>${tipo==='aviso'?'⚠️':'✅'}</span><span>${msg}</span>`;
+    c.appendChild(t); setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3500);
   }
 
-  function load(){
+  // ---------- Cache local (espelho para modo offline) ----------
+  function saveCache(){ try{localStorage.setItem('frota_vehicles',JSON.stringify(vehicles));}catch{} }
+  function loadCache(){
     try{vehicles=JSON.parse(localStorage.getItem('frota_vehicles')||'[]');}catch{vehicles=[];}
-    if(vehicles.length===0){vehicles=VEHICLES.map((v,i)=>({...v,id:i+1})); save();}
+    if(!Array.isArray(vehicles)||vehicles.length===0){vehicles=VEHICLES.map((v,i)=>({...v,id:i+1})); saveCache();}
   }
-  function save(){ localStorage.setItem('frota_vehicles',JSON.stringify(vehicles)); }
 
-  let users=[];
-  function loadUsers(){
-    try{users=JSON.parse(localStorage.getItem('frota_users')||'[]');}catch{users=[];}
-    if(users.length===0){
-      users=[{id:1,nome:'Administrador',usuario:'admin',senha:'e6c2797fed87dd7a39f60bcfe65cf34645229671607ef506720d20d41f173b2a',role:'admin',ativo:1}];
-      localStorage.setItem('frota_users',JSON.stringify(users));
+  // ---------- API ----------
+  async function api(path, opts){
+    const r=await fetch('/api'+path, opts);
+    if(!r.ok){ let msg='Erro na API'; try{msg=(await r.json()).error||msg;}catch{} throw new Error(msg); }
+    return r.json();
+  }
+
+  async function syncVehicles(){
+    try{
+      vehicles=await api('/vehicles');
+      online=true; saveCache(); setConnStatus(true);
+    }catch{
+      online=false; setConnStatus(false); loadCache();
     }
+  }
+
+  function setConnStatus(on){
+    const el=document.getElementById('conn-status'); if(!el)return;
+    el.textContent=on?'● Online':'● Offline';
+    el.className='conn-status '+(on?'conn-on':'conn-off');
   }
 
   async function hash(p){
@@ -68,12 +84,14 @@ const App = (function() {
     return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
   }
 
-  function init(){
-    loadUsers(); load();
+  async function init(){
+    bind();
     const st=localStorage.getItem('frota_token'), su=localStorage.getItem('frota_current_user');
     if(st&&su){try{currentUser=JSON.parse(su);token=st;}catch{}}
-    if(!token||!currentUser) showLogin(); else { showApp(); renderDashboard(); }
-    bind();
+    if(!token||!currentUser){ showLogin(); }
+    else { showApp(); }
+    await syncVehicles();
+    if(currentUser){ renderDashboard(); }
   }
 
   function bind(){
@@ -82,7 +100,7 @@ const App = (function() {
     if(tp) tp.addEventListener('click',()=>{const p=document.getElementById('login-pass');p.type=p.type==='text'?'password':'text';});
     document.getElementById('btn-logout').addEventListener('click',logout);
     document.getElementById('btn-toggle-sidebar').addEventListener('click',()=>document.getElementById('sidebar').classList.toggle('open'));
-    document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>page(el.dataset.page)));
+    document.querySelectorAll('.nav-item').forEach(el=>el.addEventListener('click',()=>{ page(el.dataset.page); document.getElementById('sidebar').classList.remove('open'); }));
     const s=document.getElementById('vehicle-search'); if(s)s.addEventListener('input',renderVehicles);
     const f=document.getElementById('vehicle-status-filter'); if(f)f.addEventListener('change',renderVehicles);
   }
@@ -90,18 +108,45 @@ const App = (function() {
   async function login(){
     const u=document.getElementById('login-user').value.trim(), p=document.getElementById('login-pass').value;
     const al=document.getElementById('login-alert');
+    al.style.display='none';
     if(!u||!p){al.textContent='Preencha usuário e senha.';al.style.display='block';return;}
-    const h=await hash(p);
-    const found=users.find(x=>x.usuario.toLowerCase()===u.toLowerCase()&&(x.senha===h||(u==='admin'&&(p==='admin'||p==='admin2025')))&&x.ativo===1);
-    if(found){
-      token='token_'+found.id+'_'+Date.now();
-      currentUser={id:found.id,nome:found.nome,usuario:found.usuario,role:found.role};
+
+    // 1) Tenta login na API (válido em qualquer computador)
+    try{
+      const user=await api('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:u,senha:p})});
+      token='token_'+user.id+'_'+Date.now();
+      currentUser={id:user.id,nome:user.nome,usuario:user.usuario,role:user.role};
       localStorage.setItem('frota_token',token);
       localStorage.setItem('frota_current_user',JSON.stringify(currentUser));
-      showApp(); renderDashboard(); return;
+      showApp(); await syncVehicles(); renderDashboard();
+      online=true; setConnStatus(true);
+      return;
+    }catch(e){
+      if(e.message && e.message!=='Failed to fetch' && e.message!=='NetworkError when attempting to fetch resource.'){
+        al.textContent=e.message; al.style.display='block';
+        if(e.message==='Usuário ou senha incorretos.') return; // credencial inválida: não tenta offline
+      }
     }
-    al.textContent='Usuário ou senha incorretos.';al.style.display='block';
+
+    // 2) Fallback offline: valida contra cache local
+    try{
+      const h=await hash(p);
+      let users=[]; try{users=JSON.parse(localStorage.getItem('frota_users')||'[]');}catch{}
+      if(users.length===0){users=[{id:1,nome:'Administrador',usuario:'admin',senha:'e6c2797fed87dd7a39f60bcfe65cf34645229671607ef506720d20d41f173b2a',role:'admin',ativo:1}];}
+      const found=users.find(x=>x.usuario.toLowerCase()===u.toLowerCase()&&(x.senha===h||(u==='admin'&&(p==='admin'||p==='admin2025')))&&x.ativo===1);
+      if(found){
+        token='token_offline_'+found.id+'_'+Date.now();
+        currentUser={id:found.id,nome:found.nome,usuario:found.usuario,role:found.role};
+        localStorage.setItem('frota_token',token);
+        localStorage.setItem('frota_current_user',JSON.stringify(currentUser));
+        showApp(); await syncVehicles(); renderDashboard();
+        toast('Sem conexão com a API — usando dados locais.','aviso');
+        return;
+      }
+    }catch{}
+    if(al.style.display!=='block'){al.textContent='Usuário ou senha incorretos.';al.style.display='block';}
   }
+
   function logout(){
     token=null;currentUser=null;
     localStorage.removeItem('frota_token');localStorage.removeItem('frota_current_user');
@@ -162,27 +207,59 @@ const App = (function() {
   function openVehicleModal(){editingVehicle=null;document.getElementById('vehicle-modal-title').textContent='Novo Veículo';document.getElementById('vehicle-form').reset();document.getElementById('vehicle-modal').classList.add('active');}
   function editVehicle(id){
     editingVehicle=id; const v=vehicles.find(x=>x.id===id); if(!v)return;
-    ['placa','grupo','marca','modelo','ano','cor','hodometro','combustivel','status'].forEach(k=>{const el=document.getElementById('v-'+k);if(el)el.value=v[k]||'';});
+    ['placa','grupo','marca','modelo','ano','cor','hodometro','combustivel','status','capacidade'].forEach(k=>{const el=document.getElementById('v-'+k);if(el)el.value=v[k]||'';});
     document.getElementById('vehicle-modal-title').textContent='Editar — '+v.placa;
     document.getElementById('vehicle-modal').classList.add('active');
   }
-  function saveVehicle(){
+
+  async function saveVehicle(){
     const d={}; document.querySelectorAll('#vehicle-form [name]').forEach(el=>{d[el.name]=el.value;});
     if(!d.placa)return alert('Placa obrigatória');
     d.placa=d.placa.toUpperCase().replace(/[^A-Z0-9]/g,'');
     d.hodometro=parseInt(d.hodometro)||0; d.ano=parseInt(d.ano)||null; d.capacidade=parseInt(d.capacidade)||null;
     d.status=(d.status||'ATIVO').toUpperCase();
     if(vehicles.find(x=>x.placa===d.placa&&x.id!==editingVehicle))return alert('Placa já cadastrada');
+
+    if(online){
+      try{
+        if(editingVehicle){
+          const upd=await api('/vehicles/'+editingVehicle,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+          const idx=vehicles.findIndex(v=>v.id===editingVehicle); if(idx>=0)vehicles[idx]=upd;
+        }else{
+          const novo=await api('/vehicles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+          vehicles.push(novo);
+        }
+        saveCache(); closeModal('vehicle-modal'); renderVehicles(); renderDashboard(); toast('Veículo salvo!');
+        return;
+      }catch(e){
+        toast('API falhou — salvando só neste dispositivo.','aviso');
+        online=false; setConnStatus(false);
+      }
+    }
+
+    // Fallback local
     if(editingVehicle){const idx=vehicles.findIndex(v=>v.id===editingVehicle);if(idx>=0)vehicles[idx]={...vehicles[idx],...d};}
     else{d.id=Date.now();vehicles.push(d);}
-    save(); closeModal('vehicle-modal'); renderVehicles(); renderDashboard(); toast('Veículo salvo!');
+    saveCache(); closeModal('vehicle-modal'); renderVehicles(); renderDashboard(); toast('Veículo salvo localmente!');
   }
-  function deleteVehicle(id){
+
+  async function deleteVehicle(id){
     const v=vehicles.find(x=>x.id===id); if(!confirm('Excluir '+v?.placa+'?'))return;
-    vehicles=vehicles.filter(x=>x.id!==id); save(); renderVehicles(); renderDashboard(); toast('Veículo excluído');
+    if(online){
+      try{
+        await api('/vehicles/'+id,{method:'DELETE'});
+        vehicles=vehicles.filter(x=>x.id!==id);
+        saveCache(); renderVehicles(); renderDashboard(); toast('Veículo excluído');
+        return;
+      }catch{
+        toast('API falhou — exclusão só neste dispositivo.','aviso');
+        online=false; setConnStatus(false);
+      }
+    }
+    vehicles=vehicles.filter(x=>x.id!==id); saveCache(); renderVehicles(); renderDashboard(); toast('Veículo excluído localmente');
   }
+
   function closeModal(id){const el=document.getElementById(id);if(el)el.classList.remove('active');}
 
   return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,closeModal,switchPage:page};
 })();
-document.addEventListener('DOMContentLoaded',App.init);
