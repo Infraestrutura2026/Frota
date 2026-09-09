@@ -13,7 +13,70 @@ const estado = {
   editandoId: null
 };
 
+const LOGIN_STORAGE_KEY = 'gestao_frota_sessao';
 const $ = (seletor) => document.querySelector(seletor);
+
+// ---------- Acesso à interface ----------
+
+function lerSessao() {
+  try {
+    return sessionStorage.getItem(LOGIN_STORAGE_KEY) || '';
+  } catch (erro) {
+    return '';
+  }
+}
+
+function mostrarPainel(usuario) {
+  $('#tela-login').hidden = true;
+  $('#app-shell').hidden = false;
+  $('#nome-usuario').textContent = usuario || 'Usuário';
+  $('#usuario-avatar').textContent = (usuario || 'U').charAt(0).toUpperCase();
+}
+
+function mostrarLogin() {
+  try { sessionStorage.removeItem(LOGIN_STORAGE_KEY); } catch (erro) { /* armazenamento indisponível */ }
+  $('#app-shell').hidden = true;
+  $('#tela-login').hidden = false;
+  $('#form-login').reset();
+  $('#login-mensagem').hidden = true;
+  $('#login-usuario').focus();
+}
+
+function configurarAcesso() {
+  const form = $('#form-login');
+  const mensagem = $('#login-mensagem');
+  const campoSenha = $('#login-senha');
+  const alternarSenha = $('#alternar-senha');
+
+  form.addEventListener('submit', (evento) => {
+    evento.preventDefault();
+    const usuario = $('#login-usuario').value.trim();
+    const senha = campoSenha.value;
+
+    if (!usuario || !senha) {
+      mensagem.textContent = 'Informe seu usuário e senha para continuar.';
+      mensagem.hidden = false;
+      return;
+    }
+
+    try { sessionStorage.setItem(LOGIN_STORAGE_KEY, usuario); } catch (erro) { /* segue apenas nesta sessão */ }
+    mensagem.hidden = true;
+    mostrarPainel(usuario);
+  });
+
+  alternarSenha.addEventListener('click', () => {
+    const visivel = campoSenha.type === 'text';
+    campoSenha.type = visivel ? 'password' : 'text';
+    alternarSenha.textContent = visivel ? 'Mostrar' : 'Ocultar';
+    alternarSenha.setAttribute('aria-label', visivel ? 'Mostrar senha' : 'Ocultar senha');
+  });
+
+  $('#btn-sair').addEventListener('click', mostrarLogin);
+
+  const sessao = lerSessao();
+  if (sessao) mostrarPainel(sessao);
+}
+
 
 // ---------- Utilidades ----------
 
@@ -268,6 +331,8 @@ function aoClicarNaTabela(evento) {
 // ---------- Inicialização ----------
 
 function iniciar() {
+  configurarAcesso();
+  $('#titulo-painel').textContent = 'Painel Geral';
   popularSelects();
 
   $('#btn-novo').addEventListener('click', () => abrirModal());
