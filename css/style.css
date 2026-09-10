@@ -88,8 +88,8 @@ a:focus-visible {
   width: min(72%, 520px);
   max-height: 86%;
   object-fit: contain;
-  opacity: .22;
-  filter: saturate(.9) contrast(1.15) drop-shadow(0 6px 18px rgba(0, 0, 0, .35));
+  opacity: .3;
+  filter: saturate(1.02) contrast(1.08) drop-shadow(0 6px 18px rgba(0, 0, 0, .35));
   transform: translate(-50%, -50%);
   pointer-events: none;
   user-select: none;
