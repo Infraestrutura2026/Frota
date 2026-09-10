@@ -84,14 +84,13 @@ a:focus-visible {
   position: absolute;
   z-index: -1;
   top: 50%;
-  left: 0;
-  width: min(58%, 440px);
-  max-height: 88%;
-  margin-left: -6%;
+  left: 50%;
+  width: min(72%, 520px);
+  max-height: 86%;
   object-fit: contain;
   opacity: .22;
   filter: saturate(.9) contrast(1.15) drop-shadow(0 6px 18px rgba(0, 0, 0, .35));
-  transform: translateY(-50%);
+  transform: translate(-50%, -50%);
   pointer-events: none;
   user-select: none;
 }
@@ -540,7 +539,7 @@ a:focus-visible {
 @media (max-width: 859px) {
   .login-screen { grid-template-columns: 1fr; }
   .login-brand-panel { min-height: 300px; padding: 40px 24px; }
-  .login-watermark { left: 50%; width: min(46%, 260px); margin-left: 0; transform: translate(-50%, -50%); }
+  .login-watermark { width: min(52%, 280px); }
   .login-brand-copy h1 { font-size: clamp(1.9rem, 7vw, 2.6rem); }
   .login-brand-copy p { margin-top: 9px; font-size: .92rem; }
   .login-form-panel { min-height: calc(100vh - 300px); padding: 34px 20px 48px; }
