@@ -2,9 +2,9 @@ const App = (function() {
   let token = localStorage.getItem('frota_token');
   let currentUser = null;
   let vehicles = [];
-  let oilChanges = [];
+  let maintenances = [];
   let editingVehicle = null;
-  let editingOilChange = null;
+  let editingMaintenance = null;
   let online = false;
 
   // Seed offline (usado só se a API estiver indisponível e não houver cache)
@@ -41,12 +41,15 @@ const App = (function() {
   ];
 
   const GROUPS = { S2:{label:'Grupo S2',icon:'🚐',cls:'group-s2'}, S3:{label:'Grupo S3',icon:'🚚',cls:'group-s3'}, S4:{label:'Grupo S4',icon:'🚛',cls:'group-s4'} };
+  const MAN_TIPOS = ['PREVENTIVA', 'CORRETIVA', 'EMERGENCIAL', 'REVISÃO', 'RECALL', 'TROCA DE ÓLEO'];
+  const MAN_STATUS = ['EM ANDAMENTO', 'CONCLUÍDA', 'AGUARDANDO PEÇA', 'CANCELADA'];
   function norm(g){ return String(g||'').trim().toUpperCase()||'SEM GRUPO'; }
   function keys(){ const k=['S2','S3','S4']; vehicles.forEach(v=>{ const g=norm(v.grupo); if(!k.includes(g))k.push(g); }); return k; }
   function info(g){ const k=norm(g); return GROUPS[k]||{label:`Grupo ${k}`,icon:'🚗',cls:'group-other'}; }
   function esc(value){ const d=document.createElement('div'); d.textContent=value==null?'':String(value); return d.innerHTML; }
   function dateLabel(value){ if(!value)return'-'; const parts=String(value).slice(0,10).split('-'); return parts.length===3?`${parts[2]}/${parts[1]}/${parts[0]}`:String(value); }
   function currentOilMonth(){ return document.getElementById('oil-month-filter')?.value || new Date().toISOString().slice(0,7); }
+  function oilRecords(){ return maintenances.filter(m => (m.tipo||'').toUpperCase()==='TROCA DE ÓLEO'); }
 
   function toast(msg, tipo){
     const c=document.getElementById('toast-container'); if(!c)return;
@@ -61,10 +64,10 @@ const App = (function() {
     try{vehicles=JSON.parse(localStorage.getItem('frota_vehicles')||'[]');}catch{vehicles=[];}
     if(!Array.isArray(vehicles)||vehicles.length===0){vehicles=VEHICLES.map((v,i)=>({...v,id:i+1})); saveCache();}
   }
-  function saveOilCache(){ try{localStorage.setItem('frota_oil_changes',JSON.stringify(oilChanges));}catch{} }
-  function loadOilCache(){
-    try{oilChanges=JSON.parse(localStorage.getItem('frota_oil_changes')||'[]');}catch{oilChanges=[];}
-    if(!Array.isArray(oilChanges))oilChanges=[];
+  function saveMaintCache(){ try{localStorage.setItem('frota_manutencoes',JSON.stringify(maintenances));}catch{} }
+  function loadMaintCache(){
+    try{maintenances=JSON.parse(localStorage.getItem('frota_manutencoes')||'[]');}catch{maintenances=[];}
+    if(!Array.isArray(maintenances))maintenances=[];
   }
 
   // ---------- API ----------
@@ -83,12 +86,12 @@ const App = (function() {
     }
   }
 
-  async function syncOilChanges(){
+  async function syncMaintenances(){
     try{
-      oilChanges=await api('/trocas-oleo');
-      saveOilCache();
+      maintenances=await api('/manutencoes');
+      saveMaintCache();
     }catch{
-      loadOilCache();
+      loadMaintCache();
     }
   }
 
@@ -110,7 +113,7 @@ const App = (function() {
     if(!token||!currentUser){ showLogin(); }
     else { showApp(); }
     await syncVehicles();
-    await syncOilChanges();
+    await syncMaintenances();
     if(currentUser){ renderDashboard(); }
   }
 
@@ -131,6 +134,10 @@ const App = (function() {
     const f=document.getElementById('vehicle-status-filter'); if(f)f.addEventListener('change',renderVehicles);
     const os=document.getElementById('oil-search'); if(os)os.addEventListener('input',renderOilChanges);
     const om=document.getElementById('oil-month-filter'); if(om)om.addEventListener('change',renderOilChanges);
+    const ms=document.getElementById('maint-search'); if(ms)ms.addEventListener('input',renderMaintenance);
+    const mt=document.getElementById('maint-tipo-filter'); if(mt)mt.addEventListener('change',renderMaintenance);
+    const mst=document.getElementById('maint-status-filter'); if(mst)mst.addEventListener('change',renderMaintenance);
+    const mto=document.getElementById('m-tipo'); if(mto)mto.addEventListener('change',toggleOilFields);
   }
 
   async function login(){
@@ -146,7 +153,7 @@ const App = (function() {
       currentUser={id:user.id,nome:user.nome,usuario:user.usuario,role:user.role};
       localStorage.setItem('frota_token',token);
       localStorage.setItem('frota_current_user',JSON.stringify(currentUser));
-      showApp(); await syncVehicles(); await syncOilChanges(); renderDashboard();
+      showApp(); await syncVehicles(); await syncMaintenances(); renderDashboard();
       online=true; setConnStatus(true);
       return;
     }catch(e){
@@ -167,7 +174,7 @@ const App = (function() {
         currentUser={id:found.id,nome:found.nome,usuario:found.usuario,role:found.role};
         localStorage.setItem('frota_token',token);
         localStorage.setItem('frota_current_user',JSON.stringify(currentUser));
-        showApp(); await syncVehicles(); await syncOilChanges(); renderDashboard();
+        showApp(); await syncVehicles(); await syncMaintenances(); renderDashboard();
         toast('Sem conexão com a API — usando dados locais.','aviso');
         return;
       }
@@ -192,14 +199,29 @@ const App = (function() {
     document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
     const t=document.getElementById('page-'+p); if(t)t.classList.add('active');
     const nv=document.querySelector(`.nav-item[data-page="${p}"]`); if(nv)nv.classList.add('active');
-    const titles={dashboard:'Painel Geral',vehicles:'Cadastro de Veículos','oil-changes':'Troca de Óleo'};
+    const titles={dashboard:'Painel Geral',vehicles:'Cadastro de Veículos',manutencao:'Manutenção','oil-changes':'Troca de Óleo'};
     document.getElementById('page-title').textContent=titles[p]||'Gestão de Frota';
     if(p==='dashboard')renderDashboard();
     if(p==='vehicles')renderVehicles();
+    if(p==='manutencao')renderMaintenance();
     if(p==='oil-changes')renderOilChanges();
   }
 
   function badge(s){s=(s||'').toUpperCase();if(s==='ATIVO')return'success';if(s==='MANUTENÇÃO')return'danger';if(s==='ARROLAMENTO')return'warning';return'default';}
+  function tipoBadge(t){
+    t=(t||'').toUpperCase();
+    if(t==='TROCA DE ÓLEO')return'success';
+    if(t==='PREVENTIVA')return'warning';
+    if(t==='CORRETIVA'||t==='EMERGENCIAL')return'danger';
+    return'default';
+  }
+  function osBadge(s){
+    s=(s||'').toUpperCase();
+    if(s==='CONCLUÍDA')return'success';
+    if(s==='EM ANDAMENTO')return'warning';
+    if(s==='AGUARDANDO PEÇA')return'danger';
+    return'default';
+  }
 
   function renderDashboard(){
     renderDashGroups();
@@ -235,90 +257,145 @@ const App = (function() {
     }).join('');
   }
 
+  // ============ MANUTENÇÃO ============
+
+  function renderMaintenance(){
+    const search=(document.getElementById('maint-search')?.value||'').toLowerCase();
+    const tipo=(document.getElementById('maint-tipo-filter')?.value||'').toUpperCase();
+    const status=(document.getElementById('maint-status-filter')?.value||'').toUpperCase();
+    const filtered=maintenances.filter(m=>{
+      const v=vehicles.find(x=>Number(x.id)===Number(m.vehicle_id));
+      const text=`${m.placa||''} ${v?.marca||''} ${v?.modelo||''} ${m.servico||''} ${m.oficina||''} ${m.itens||''} ${m.observacoes||''}`.toLowerCase();
+      return (!tipo||(m.tipo||'').toUpperCase()===tipo)&&(!status||(m.status_os||'').toUpperCase()===status)&&(!search||text.includes(search));
+    });
+    const totalEl=document.getElementById('maint-summary-total'); if(totalEl)totalEl.textContent=filtered.length;
+    const openCount=filtered.filter(m=>['EM ANDAMENTO','AGUARDANDO PEÇA'].includes((m.status_os||'').toUpperCase())).length;
+    const openEl=document.getElementById('maint-summary-open'); if(openEl)openEl.textContent=openCount;
+    const cost=filtered.reduce((s,m)=>s+Number(m.custo||0),0);
+    const costEl=document.getElementById('maint-summary-cost'); if(costEl)costEl.textContent='R$ '+cost.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const countEl=document.getElementById('maint-count'); if(countEl)countEl.textContent=`${filtered.length} registro(s)`;
+    const list=document.getElementById('maint-list'); if(!list)return;
+    const rows=filtered.map(m=>{
+      const v=vehicles.find(x=>Number(x.id)===Number(m.vehicle_id));
+      const plate=m.placa||v?.placa||'-';
+      const model=v?`${v.marca||''} ${v.modelo||''}`.trim():'Veículo cadastrado';
+      const km=m.hodometro==null?'-':`${Number(m.hodometro).toLocaleString('pt-BR')} km`;
+      const prox=m.proxima_manutencao==null?'':'<small class="table-subtitle">próx. '+Number(m.proxima_manutencao).toLocaleString('pt-BR')+' km</small>';
+      const costTxt=m.custo==null?'-':'R$ '+Number(m.custo).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+      return `<tr><td>${dateLabel(m.data)}</td><td><span class="placa-badge">${esc(plate)}</span><small class="table-subtitle">${esc(model)}</small></td><td><span class="badge ${tipoBadge(m.tipo)}">${esc(m.tipo||'-')}</span></td><td>${esc(m.servico||'-')}</td><td>${km}${prox}</td><td><span class="badge ${osBadge(m.status_os)}">${esc(m.status_os||'-')}</span></td><td>${costTxt}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(m.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(m.id)})">🗑️</button></td></tr>`;
+    }).join('');
+    list.innerHTML=`<table class="data-table"><thead><tr><th>Data</th><th>Veículo</th><th>Tipo</th><th>Serviço</th><th>Hodômetro</th><th>Status</th><th>Custo</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty-state">Nenhuma manutenção encontrada para os filtros selecionados.</td></tr>'}</tbody></table>`;
+  }
+
+  function toggleOilFields(){
+    const tipo=(document.getElementById('m-tipo')?.value||'').toUpperCase();
+    document.querySelectorAll('#maintenance-form .oil-only').forEach(el=>{ el.style.display = tipo==='TROCA DE ÓLEO' ? '' : 'none'; });
+  }
+
+  function vehicleOptions(selected){
+    return ['<option value="">Selecione o veículo</option>',...vehicles.map(v=>`<option value="${Number(v.id)}" ${Number(v.id)===Number(selected)?'selected':''}>${esc(v.placa)} — ${esc(`${v.marca||''} ${v.modelo||''}`.trim())}</option>`)].join('');
+  }
+
+  function openMaintenanceModal(preset){
+    editingMaintenance=null;
+    const title=document.getElementById('maintenance-modal-title');
+    title.textContent=preset==='TROCA DE ÓLEO'?'Registrar Troca de Óleo':'Nova Manutenção';
+    const form=document.getElementById('maintenance-form'); if(form)form.reset();
+    const data=document.getElementById('m-data'); if(data)data.value=new Date().toISOString().slice(0,10);
+    const select=document.getElementById('m-vehicle'); if(select)select.innerHTML=vehicleOptions('');
+    const tipo=document.getElementById('m-tipo');
+    if(tipo){ tipo.disabled=false; tipo.value=preset||'PREVENTIVA'; if(preset==='TROCA DE ÓLEO')tipo.disabled=true; }
+    toggleOilFields();
+    document.getElementById('maintenance-modal').classList.add('active');
+  }
+
+  function editMaintenance(id){
+    const item=maintenances.find(x=>Number(x.id)===Number(id)); if(!item)return;
+    editingMaintenance=Number(id);
+    document.getElementById('maintenance-modal-title').textContent = item.tipo==='TROCA DE ÓLEO' ? 'Editar Troca de Óleo' : 'Editar Manutenção';
+    const tipo=document.getElementById('m-tipo'); if(tipo){tipo.disabled=false;tipo.value=item.tipo||'PREVENTIVA';}
+    document.getElementById('m-vehicle').innerHTML=vehicleOptions(item.vehicle_id);
+    document.getElementById('m-vehicle').value=item.vehicle_id||'';
+    document.getElementById('m-data').value=String(item.data||'').slice(0,10);
+    document.getElementById('m-data-saida').value=item.data_saida?String(item.data_saida).slice(0,10):'';
+    document.getElementById('m-hodometro').value=item.hodometro??'';
+    document.getElementById('m-proxima').value=item.proxima_manutencao??'';
+    document.getElementById('m-tipo-oleo').value=item.tipo_oleo||'';
+    document.getElementById('m-quantidade').value=item.quantidade??'';
+    document.getElementById('m-status-os').value=item.status_os||'CONCLUÍDA';
+    document.getElementById('m-oficina').value=item.oficina||'';
+    document.getElementById('m-custo').value=item.custo??'';
+    document.getElementById('m-servico').value=item.servico||'';
+    document.getElementById('m-itens').value=item.itens||'';
+    document.getElementById('m-observacoes').value=item.observacoes||'';
+    toggleOilFields();
+    document.getElementById('maintenance-modal').classList.add('active');
+  }
+
+  async function saveMaintenance(){
+    const form=document.getElementById('maintenance-form');
+    const data={}; form.querySelectorAll('[name]').forEach(el=>{data[el.name]=el.value;});
+    if(!data.vehicle_id)return alert('Selecione o veículo.');
+    if(!data.data)return alert('Informe a data de entrada.');
+    data.vehicle_id=Number(data.vehicle_id);
+    data.hodometro=data.hodometro===''?null:Number(data.hodometro);
+    data.proxima_manutencao=data.proxima_manutencao===''?null:Number(data.proxima_manutencao);
+    data.custo=data.custo===''?null:Number(data.custo);
+    data.quantidade=data.quantidade===''?null:Number(data.quantidade);
+    data.tipo=(data.tipo||'PREVENTIVA').toUpperCase();
+    data.status_os=(data.status_os||'CONCLUÍDA').toUpperCase();
+    data.tipo_oleo=(data.tipo_oleo||'').trim().toUpperCase()||null;
+    if(data.tipo==='TROCA DE ÓLEO'){ if(!data.servico) data.servico='Troca de óleo'; }
+    else if(!data.servico){ return alert('Informe o serviço/descrição da manutenção.'); }
+    if(online){
+      try{
+        const saved=await api(editingMaintenance?`/manutencoes/${editingMaintenance}`:'/manutencoes',{method:editingMaintenance?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+        if(editingMaintenance){const i=maintenances.findIndex(x=>Number(x.id)===editingMaintenance);if(i>=0)maintenances[i]=saved;}
+        else maintenances.unshift(saved);
+        saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); toast(data.tipo==='TROCA DE ÓLEO'?'Troca de óleo salva!':'Manutenção salva!'); return;
+      }catch(e){ toast('API falhou — salvando só neste dispositivo.','aviso'); }
+    }
+    const local={...data,id:editingMaintenance||Date.now(),placa:vehicles.find(v=>Number(v.id)===Number(data.vehicle_id))?.placa||null,data_entrada:data.data};
+    if(editingMaintenance){const i=maintenances.findIndex(x=>Number(x.id)===editingMaintenance);if(i>=0)maintenances[i]={...maintenances[i],...local};}
+    else maintenances.unshift(local);
+    saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); toast('Registro salvo localmente!','aviso');
+  }
+
+  async function deleteMaintenance(id){
+    const item=maintenances.find(x=>Number(x.id)===Number(id));
+    const label=item?.tipo==='TROCA DE ÓLEO'?'troca de óleo':'manutenção';
+    if(!confirm(`Excluir o registro de ${label} de ${dateLabel(item?.data)}?`))return;
+    if(online){
+      try{await api('/manutencoes/'+id,{method:'DELETE'});maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));saveMaintCache();renderMaintenance();renderOilChanges();toast('Registro excluído!');return;}
+      catch{toast('API falhou — exclusão só neste dispositivo.','aviso');}
+    }
+    maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));saveMaintCache();renderMaintenance();renderOilChanges();toast('Registro excluído localmente!','aviso');
+  }
+
+  // ============ TROCA DE ÓLEO (visão ligada à Manutenção) ============
+
   function renderOilChanges(){
     const monthEl=document.getElementById('oil-month-filter');
     const month=monthEl?.value||'';
     const search=(document.getElementById('oil-search')?.value||'').toLowerCase().trim();
-    const filtered=oilChanges.filter(item=>{
-      const vehicle=vehicles.find(v=>Number(v.id)===Number(item.vehicle_id));
-      const text=`${item.placa||''} ${vehicle?.marca||''} ${vehicle?.modelo||''} ${item.tipo_oleo||item.oleo||''} ${item.observacoes||''}`.toLowerCase();
+    const filtered=oilRecords().filter(item=>{
+      const v=vehicles.find(x=>Number(x.id)===Number(item.vehicle_id));
+      const text=`${item.placa||''} ${v?.marca||''} ${v?.modelo||''} ${item.tipo_oleo||''} ${item.observacoes||''}`.toLowerCase();
       return (!month||String(item.data||'').slice(0,7)===month)&&(!search||text.includes(search));
     });
     const totalEl=document.getElementById('oil-summary-total'); if(totalEl)totalEl.textContent=filtered.length;
     const vehiclesEl=document.getElementById('oil-summary-vehicles'); if(vehiclesEl)vehiclesEl.textContent=new Set(filtered.map(x=>x.vehicle_id||x.placa)).size;
-    const hoursEl=document.getElementById('oil-summary-hours'); if(hoursEl)hoursEl.textContent=filtered.reduce((sum,x)=>sum+Number(x.horimetro||0),0).toLocaleString('pt-BR');
+    const litersEl=document.getElementById('oil-summary-liters'); if(litersEl)litersEl.textContent=filtered.reduce((sum,x)=>sum+Number(x.quantidade||0),0).toLocaleString('pt-BR',{maximumFractionDigits:2});
     const countEl=document.getElementById('oil-count'); if(countEl)countEl.textContent=`${filtered.length} registro(s)`;
     const list=document.getElementById('oil-changes-list'); if(!list)return;
     const rows=filtered.map(item=>{
-      const vehicle=vehicles.find(v=>Number(v.id)===Number(item.vehicle_id));
-      const plate=item.placa||vehicle?.placa||'-';
-      const model=vehicle?`${vehicle.marca||''} ${vehicle.modelo||''}`.trim():'Veículo cadastrado';
+      const v=vehicles.find(x=>Number(x.id)===Number(item.vehicle_id));
+      const plate=item.placa||v?.placa||'-';
+      const model=v?`${v.marca||''} ${v.modelo||''}`.trim():'Veículo cadastrado';
       const quantity=item.quantidade==null?'-':`${Number(item.quantidade).toLocaleString('pt-BR',{maximumFractionDigits:2})} L`;
-      return `<tr><td>${dateLabel(item.data)}</td><td><span class="placa-badge">${esc(plate)}</span><small class="table-subtitle">${esc(model)}</small></td><td>${esc(item.tipo_oleo||item.oleo||'-')}</td><td>${item.hodometro==null?'-':`${Number(item.hodometro).toLocaleString('pt-BR')} km`}</td><td>${item.horimetro==null?'-':`${Number(item.horimetro).toLocaleString('pt-BR')} h`}</td><td>${quantity}</td><td>${esc(item.observacoes||'-')}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editOilChange(${Number(item.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteOilChange(${Number(item.id)})">🗑️</button></td></tr>`;
+      return `<tr><td>${dateLabel(item.data)}</td><td><span class="placa-badge">${esc(plate)}</span><small class="table-subtitle">${esc(model)}</small></td><td>${esc(item.tipo_oleo||'-')}</td><td>${item.hodometro==null?'-':`${Number(item.hodometro).toLocaleString('pt-BR')} km`}</td><td>${quantity}</td><td>${esc(item.observacoes||'-')}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(item.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(item.id)})">🗑️</button></td></tr>`;
     }).join('');
-    list.innerHTML=`<table class="data-table"><thead><tr><th>Data</th><th>Veículo</th><th>Óleo</th><th>Hodômetro</th><th>Horímetro</th><th>Quantidade</th><th>Observações</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty-state">Nenhuma troca de óleo encontrada para os filtros selecionados.</td></tr>'}</tbody></table>`;
-  }
-
-  function oilVehicleOptions(selected){
-    return ['<option value="">Selecione o veículo</option>',...vehicles.map(v=>`<option value="${Number(v.id)}" ${Number(v.id)===Number(selected)?'selected':''}>${esc(v.placa)} — ${esc(`${v.marca||''} ${v.modelo||''}`.trim())}</option>`)].join('');
-  }
-
-  function openOilModal(){
-    editingOilChange=null;
-    document.getElementById('oil-modal-title').textContent='Registrar Troca de Óleo';
-    document.getElementById('oil-form').reset();
-    const date=document.getElementById('oil-data'); if(date)date.value=new Date().toISOString().slice(0,10);
-    const select=document.getElementById('oil-vehicle'); if(select)select.innerHTML=oilVehicleOptions('');
-    document.getElementById('oil-modal').classList.add('active');
-  }
-
-  function editOilChange(id){
-    const item=oilChanges.find(x=>Number(x.id)===Number(id)); if(!item)return;
-    editingOilChange=Number(id);
-    document.getElementById('oil-modal-title').textContent='Editar Troca de Óleo';
-    document.getElementById('oil-vehicle').innerHTML=oilVehicleOptions(item.vehicle_id);
-    document.getElementById('oil-vehicle').value=item.vehicle_id||'';
-    document.getElementById('oil-data').value=String(item.data||'').slice(0,10);
-    document.getElementById('oil-tipo').value=item.tipo_oleo||item.oleo||'';
-    document.getElementById('oil-quantidade').value=item.quantidade??'';
-    document.getElementById('oil-hodometro').value=item.hodometro??'';
-    document.getElementById('oil-horimetro').value=item.horimetro??'';
-    document.getElementById('oil-observacoes').value=item.observacoes||'';
-    document.getElementById('oil-modal').classList.add('active');
-  }
-
-  async function saveOilChange(){
-    const form=document.getElementById('oil-form');
-    const data={}; form.querySelectorAll('[name]').forEach(el=>{data[el.name]=el.value;});
-    if(!data.vehicle_id)return alert('Selecione o veículo.');
-    if(!data.data)return alert('Informe a data da troca.');
-    data.vehicle_id=Number(data.vehicle_id);
-    data.quantidade=data.quantidade===''?null:Number(data.quantidade);
-    data.hodometro=data.hodometro===''?null:Number(data.hodometro);
-    data.horimetro=data.horimetro===''?null:Number(data.horimetro);
-    data.tipo_oleo=(data.tipo_oleo||'').toUpperCase();
-    if(online){
-      try{
-        const saved=await api(editingOilChange?`/trocas-oleo/${editingOilChange}`:'/trocas-oleo',{method:editingOilChange?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-        if(editingOilChange){const index=oilChanges.findIndex(x=>Number(x.id)===editingOilChange);if(index>=0)oilChanges[index]=saved;}
-        else oilChanges.unshift(saved);
-        saveOilCache(); closeModal('oil-modal'); renderOilChanges(); toast('Troca de óleo salva!'); return;
-      }catch(e){ toast('API falhou — salvando só neste dispositivo.','aviso'); }
-    }
-    const local={...data,id:editingOilChange||Date.now(),placa:vehicles.find(v=>Number(v.id)===Number(data.vehicle_id))?.placa||null,data_troca:data.data,tipo_oleo:data.tipo_oleo,oleo:data.tipo_oleo};
-    if(editingOilChange){const index=oilChanges.findIndex(x=>Number(x.id)===editingOilChange);if(index>=0)oilChanges[index]={...oilChanges[index],...local};}
-    else oilChanges.unshift(local);
-    saveOilCache(); closeModal('oil-modal'); renderOilChanges(); toast('Troca salva localmente!','aviso');
-  }
-
-  async function deleteOilChange(id){
-    const item=oilChanges.find(x=>Number(x.id)===Number(id));
-    if(!confirm(`Excluir o registro de ${dateLabel(item?.data)}?`))return;
-    if(online){
-      try{await api('/trocas-oleo/'+id,{method:'DELETE'});oilChanges=oilChanges.filter(x=>Number(x.id)!==Number(id));saveOilCache();renderOilChanges();toast('Registro excluído!');return;}
-      catch{toast('API falhou — exclusão só neste dispositivo.','aviso');}
-    }
-    oilChanges=oilChanges.filter(x=>Number(x.id)!==Number(id));saveOilCache();renderOilChanges();toast('Registro excluído localmente!','aviso');
+    list.innerHTML=`<table class="data-table"><thead><tr><th>Data</th><th>Veículo</th><th>Óleo</th><th>Hodômetro</th><th>Quantidade</th><th>Observações</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty-state">Nenhuma troca de óleo encontrada para os filtros selecionados.</td></tr>'}</tbody></table>`;
   }
 
   async function loadOilReport(){
@@ -329,12 +406,14 @@ const App = (function() {
     let report;
     try{report=await api(`/trocas-oleo/relatorio-mensal?ano=${encodeURIComponent(ano)}&mes=${encodeURIComponent(mes)}`);}
     catch{
-      const records=oilChanges.filter(x=>String(x.data||'').slice(0,7)===`${ano}-${mes}`);
-      report={ano,mes,total:records.length,total_horimetro:records.reduce((s,x)=>s+Number(x.horimetro||0),0),por_veiculo:[]};
+      const records=oilRecords().filter(x=>String(x.data||'').slice(0,7)===`${ano}-${mes}`);
+      report={ano,mes,total:records.length,total_quantidade:records.reduce((s,x)=>s+Number(x.quantidade||0),0),por_veiculo:[]};
     }
     const groups=(report.por_veiculo||[]).map(item=>`<span class="report-chip"><b>${esc(item.placa||'Sem placa')}</b> ${item.total} troca(s)</span>`).join('');
-    output.innerHTML=`<div><strong>${String(mes).padStart(2,'0')}/${ano}</strong><span>${report.total||0} troca(s) registrada(s)</span><span>${Number(report.total_horimetro||0).toLocaleString('pt-BR')} h de horímetro informado</span></div><div class="report-chips">${groups||'<span class="report-muted">Nenhum veículo no período.</span>'}</div>`;
+    output.innerHTML=`<div><strong>${String(mes).padStart(2,'0')}/${ano}</strong><span>${report.total||0} troca(s) registrada(s)</span><span>${Number(report.total_quantidade||0).toLocaleString('pt-BR',{maximumFractionDigits:2})} L de óleo</span></div><div class="report-chips">${groups||'<span class="report-muted">Nenhum veículo no período.</span>'}</div>`;
   }
+
+  // ============ VEÍCULOS ============
 
   function openVehicleModal(){editingVehicle=null;document.getElementById('vehicle-modal-title').textContent='Novo Veículo';document.getElementById('vehicle-form').reset();document.getElementById('vehicle-modal').classList.add('active');}
   function editVehicle(id){
@@ -393,5 +472,5 @@ const App = (function() {
 
   function closeModal(id){const el=document.getElementById(id);if(el)el.classList.remove('active');}
 
-  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openOilModal,editOilChange,saveOilChange,deleteOilChange,loadOilReport,closeModal,switchPage:page};
+  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,closeModal,switchPage:page};
 })();

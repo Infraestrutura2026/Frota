@@ -543,6 +543,9 @@ a:focus-visible {
 .report-loading { color: var(--text-muted); font-size: .82rem; }
 .form-field-wide { grid-column: 1 / -1; }
 
+/* Campos exclusivos de Troca de Óleo no modal de Manutenção */
+.form-field.oil-only { display: none; }
+
 /* ============ MODAL ============ */
 
 .modal { display: none; position: fixed; z-index: 100; inset: 0; }

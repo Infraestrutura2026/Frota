@@ -65,6 +65,9 @@
         <button type="button" class="nav-item" data-page="vehicles">
           <span class="nav-icon" aria-hidden="true">▤</span> Veículos
         </button>
+        <button type="button" class="nav-item" data-page="manutencao">
+          <span class="nav-icon" aria-hidden="true">🔧</span> Manutenção
+        </button>
         <button type="button" class="nav-item" data-page="oil-changes">
           <span class="nav-icon" aria-hidden="true">◉</span> Troca de Óleo
         </button>
@@ -137,6 +140,53 @@
           <div class="vehicles-groups" id="vehicles-groups"></div>
         </section>
 
+        <!-- ===== Página: Manutenção ===== -->
+        <section class="page-section" id="page-manutencao">
+          <div class="section-head">
+            <div>
+              <span class="section-kicker">Ordens de serviço</span>
+              <h3>Manutenção da Frota</h3>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="App.openMaintenanceModal()">＋ Nova manutenção</button>
+          </div>
+
+          <div class="oil-summary-grid">
+            <div class="card oil-summary-card"><span class="summary-label">Registros</span><strong id="maint-summary-total">0</strong><small>ordens de serviço</small></div>
+            <div class="card oil-summary-card"><span class="summary-label">Em andamento</span><strong id="maint-summary-open">0</strong><small>OS abertas</small></div>
+            <div class="card oil-summary-card"><span class="summary-label">Custo</span><strong id="maint-summary-cost">R$ 0,00</strong><small>somando os registros listados</small></div>
+          </div>
+
+          <div class="vehicles-toolbar card oil-toolbar">
+            <input type="search" id="maint-search" placeholder="Buscar por placa, serviço, oficina ou observação…" aria-label="Buscar manutenção">
+            <label class="oil-month-field"><span>Tipo</span>
+              <select id="maint-tipo-filter" aria-label="Filtrar por tipo de manutenção">
+                <option value="">Todos os tipos</option>
+                <option value="PREVENTIVA">Preventiva</option>
+                <option value="CORRETIVA">Corretiva</option>
+                <option value="EMERGENCIAL">Emergencial</option>
+                <option value="REVISÃO">Revisão</option>
+                <option value="RECALL">Recall</option>
+                <option value="TROCA DE ÓLEO">Troca de óleo</option>
+              </select>
+            </label>
+            <label class="oil-month-field"><span>Status</span>
+              <select id="maint-status-filter" aria-label="Filtrar por status da OS">
+                <option value="">Todos os status</option>
+                <option value="EM ANDAMENTO">Em andamento</option>
+                <option value="CONCLUÍDA">Concluída</option>
+                <option value="AGUARDANDO PEÇA">Aguardando peça</option>
+                <option value="CANCELADA">Cancelada</option>
+              </select>
+            </label>
+            <span class="vehicle-count" id="maint-count">0 registro(s)</span>
+          </div>
+
+          <div class="card oil-table-card">
+            <div class="section-head oil-list-head"><div><span class="section-kicker">Histórico</span><h3>Ordens de serviço</h3></div></div>
+            <div class="table-responsive" id="maint-list"></div>
+          </div>
+        </section>
+
         <!-- ===== Página: Troca de Óleo ===== -->
         <section class="page-section" id="page-oil-changes">
           <div class="section-head">
@@ -144,13 +194,13 @@
               <span class="section-kicker">Manutenção preventiva</span>
               <h3>Troca de Óleo</h3>
             </div>
-            <button type="button" class="btn btn-primary" onclick="App.openOilModal()">＋ Registrar troca</button>
+            <button type="button" class="btn btn-primary" onclick="App.openMaintenanceModal('TROCA DE ÓLEO')">＋ Registrar troca</button>
           </div>
 
           <div class="oil-summary-grid">
             <div class="card oil-summary-card"><span class="summary-label">Registros no período</span><strong id="oil-summary-total">0</strong><small>trocas de óleo</small></div>
             <div class="card oil-summary-card"><span class="summary-label">Veículos atendidos</span><strong id="oil-summary-vehicles">0</strong><small>veículos</small></div>
-            <div class="card oil-summary-card"><span class="summary-label">Horímetro informado</span><strong id="oil-summary-hours">0</strong><small>horas acumuladas</small></div>
+            <div class="card oil-summary-card"><span class="summary-label">Óleo utilizado</span><strong id="oil-summary-liters">0</strong><small>litros no período</small></div>
           </div>
 
           <div class="vehicles-toolbar card oil-toolbar">
@@ -174,48 +224,88 @@
     </div>
   </div>
 
-  <!-- ================= MODAL: Troca de Óleo ================= -->
-  <div class="modal" id="oil-modal">
-    <div class="modal-backdrop" onclick="App.closeModal('oil-modal')"></div>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="oil-modal-title">
+  <!-- ================= MODAL: Manutenção (inclui Troca de Óleo) ================= -->
+  <div class="modal" id="maintenance-modal">
+    <div class="modal-backdrop" onclick="App.closeModal('maintenance-modal')"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="maintenance-modal-title">
       <div class="modal-header">
-        <h3 id="oil-modal-title">Registrar Troca de Óleo</h3>
-        <button type="button" class="btn btn-icon" title="Fechar" aria-label="Fechar" onclick="App.closeModal('oil-modal')">✕</button>
+        <h3 id="maintenance-modal-title">Nova Manutenção</h3>
+        <button type="button" class="btn btn-icon" title="Fechar" aria-label="Fechar" onclick="App.closeModal('maintenance-modal')">✕</button>
       </div>
-      <form id="oil-form" onsubmit="event.preventDefault(); App.saveOilChange();">
+      <form id="maintenance-form" onsubmit="event.preventDefault(); App.saveMaintenance();">
         <div class="form-grid">
           <label class="form-field">
             <span>Veículo *</span>
-            <select id="oil-vehicle" name="vehicle_id" required></select>
+            <select id="m-vehicle" name="vehicle_id" required></select>
           </label>
           <label class="form-field">
-            <span>Data da troca *</span>
-            <input type="date" id="oil-data" name="data" required>
+            <span>Tipo de manutenção *</span>
+            <select id="m-tipo" name="tipo">
+              <option value="PREVENTIVA">Preventiva</option>
+              <option value="CORRETIVA">Corretiva</option>
+              <option value="EMERGENCIAL">Emergencial</option>
+              <option value="REVISÃO">Revisão</option>
+              <option value="RECALL">Recall</option>
+              <option value="TROCA DE ÓLEO">Troca de óleo</option>
+            </select>
           </label>
           <label class="form-field">
-            <span>Tipo de óleo</span>
-            <input type="text" id="oil-tipo" name="tipo_oleo" placeholder="5W30, 15W40…">
+            <span>Data de entrada *</span>
+            <input type="date" id="m-data" name="data" required>
           </label>
           <label class="form-field">
-            <span>Quantidade (litros)</span>
-            <input type="number" id="oil-quantidade" name="quantidade" min="0" step="0.1" placeholder="0">
+            <span>Data de saída</span>
+            <input type="date" id="m-data-saida" name="data_saida">
           </label>
           <label class="form-field">
             <span>Hodômetro (km)</span>
-            <input type="number" id="oil-hodometro" name="hodometro" min="0" placeholder="0">
+            <input type="number" id="m-hodometro" name="hodometro" min="0" placeholder="0">
           </label>
           <label class="form-field">
-            <span>Horímetro (h)</span>
-            <input type="number" id="oil-horimetro" name="horimetro" min="0" placeholder="0">
+            <span>Próxima manutenção (km)</span>
+            <input type="number" id="m-proxima" name="proxima_manutencao" min="0" placeholder="0">
+          </label>
+          <label class="form-field oil-only">
+            <span>Tipo de óleo</span>
+            <input type="text" id="m-tipo-oleo" name="tipo_oleo" placeholder="5W30, 15W40…">
+          </label>
+          <label class="form-field oil-only">
+            <span>Quantidade (litros)</span>
+            <input type="number" id="m-quantidade" name="quantidade" min="0" step="0.1" placeholder="0">
+          </label>
+          <label class="form-field">
+            <span>Status da OS</span>
+            <select id="m-status-os" name="status_os">
+              <option value="EM ANDAMENTO">Em andamento</option>
+              <option value="CONCLUÍDA">Concluída</option>
+              <option value="AGUARDANDO PEÇA">Aguardando peça</option>
+              <option value="CANCELADA">Cancelada</option>
+            </select>
+          </label>
+          <label class="form-field">
+            <span>Oficina / responsável</span>
+            <input type="text" id="m-oficina" name="oficina" placeholder="Oficina ou responsável">
+          </label>
+          <label class="form-field">
+            <span>Custo (R$)</span>
+            <input type="number" id="m-custo" name="custo" min="0" step="0.01" placeholder="0,00">
+          </label>
+          <label class="form-field form-field-wide">
+            <span>Serviço / descrição *</span>
+            <textarea id="m-servico" name="servico" rows="2" placeholder="O que foi feito no veículo"></textarea>
+          </label>
+          <label class="form-field form-field-wide">
+            <span>Itens / peças</span>
+            <textarea id="m-itens" name="itens" rows="2" placeholder="Peças substituídas"></textarea>
           </label>
           <label class="form-field form-field-wide">
             <span>Observações</span>
-            <textarea id="oil-observacoes" name="observacoes" rows="3" placeholder="Informe filtros, oficina ou outras observações"></textarea>
+            <textarea id="m-observacoes" name="observacoes" rows="2" placeholder="Observações gerais"></textarea>
           </label>
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn" onclick="App.closeModal('oil-modal')">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Salvar registro</button>
+          <button type="button" class="btn" onclick="App.closeModal('maintenance-modal')">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
     </div>
