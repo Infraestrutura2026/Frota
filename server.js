@@ -21,7 +21,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.3';
+const VERSION = '3.4';
 
 // Hash legado mantido para compatibilidade com bancos antigos.
 const LEGACY_ADMIN_HASH = 'e6c2797fed87dd7a39f60bcfe65cf34645229671607ef506720d20d41f173b2a';
@@ -94,6 +94,24 @@ function ensureNeon() {
         id INTEGER PRIMARY KEY,
         nome TEXT, usuario TEXT, senha TEXT, role TEXT, ativo INTEGER
       )`;
+      // O módulo de Troca de Óleo é auto-inicializável. O ALTER também cobre
+      // bancos Neon criados por uma versão anterior do módulo.
+      await sql`CREATE TABLE IF NOT EXISTS oil_changes (
+        id INTEGER PRIMARY KEY,
+        vehicle_id INTEGER,
+        veiculo_id INTEGER,
+        placa TEXT,
+        data DATE,
+        data_troca DATE,
+        tipo_oleo TEXT,
+        oleo TEXT,
+        quantidade NUMERIC,
+        hodometro INTEGER,
+        horimetro INTEGER,
+        observacoes TEXT,
+        created_at TIMESTAMPTZ DEFAULT now()
+      )`;
+      await sql`ALTER TABLE oil_changes ADD COLUMN IF NOT EXISTS horimetro INTEGER`;
       const vc = await sql`SELECT COUNT(*)::int AS n FROM vehicles`;
       if (vc[0].n === 0) {
         for (const v of INITIAL_VEHICLES) {
@@ -120,7 +138,7 @@ function loadFile() {
   if (dbFile) return dbFile;
   if (!fs.existsSync(DATA_DIR)) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {} }
   if (!fs.existsSync(DB_FILE)) {
-    const initial = { vehicles: INITIAL_VEHICLES, users: INITIAL_USERS };
+    const initial = { vehicles: INITIAL_VEHICLES, users: INITIAL_USERS, oil_changes: [] };
     try { fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2)); } catch {}
     dbFile = initial;
     return dbFile;
@@ -129,9 +147,10 @@ function loadFile() {
     const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
     if (!Array.isArray(data.vehicles) || data.vehicles.length === 0) data.vehicles = INITIAL_VEHICLES;
     if (!Array.isArray(data.users)) data.users = INITIAL_USERS;
+    if (!Array.isArray(data.oil_changes)) data.oil_changes = [];
     dbFile = data;
   } catch {
-    dbFile = { vehicles: INITIAL_VEHICLES, users: INITIAL_USERS };
+    dbFile = { vehicles: INITIAL_VEHICLES, users: INITIAL_USERS, oil_changes: [] };
   }
   return dbFile;
 }
@@ -143,6 +162,215 @@ function saveFile() {
 // ---------- Operações unificadas ----------
 
 const V_COLS = 'id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade';
+const OIL_COLS = 'id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes, created_at';
+
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+
+function dateOnly(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const text = String(value);
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function oilChangeData(body) {
+  body = body || {};
+  const vehicleId = intOrNull(body.vehicle_id ?? body.veiculo_id ?? body.vehicleId ?? body.veiculoId);
+  const placa = String(body.placa || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || null;
+  const data = dateOnly(body.data ?? body.data_troca ?? body.date ?? body.dataTroca) || todayISO();
+  const tipoOleo = String(body.tipo_oleo ?? body.oleo ?? body.tipoOleo ?? '').trim().toUpperCase() || null;
+  const quantidade = numberOrNull(body.quantidade ?? body.litros ?? body.quantity);
+  const hodometro = intOrNull(body.hodometro ?? body.km ?? body.mileage);
+  const horimetro = intOrNull(body.horimetro ?? body.horas ?? body.hours);
+  const observacoes = body.observacoes ?? body.observacao ?? body.notes ?? null;
+  return {
+    vehicle_id: vehicleId,
+    veiculo_id: vehicleId,
+    placa,
+    data,
+    data_troca: data,
+    tipo_oleo: tipoOleo,
+    oleo: tipoOleo,
+    quantidade,
+    hodometro,
+    horimetro,
+    observacoes: observacoes ? String(observacoes).trim() : null
+  };
+}
+
+function publicOilChange(row) {
+  if (!row) return null;
+  const vehicleId = row.vehicle_id ?? row.veiculo_id;
+  const data = dateOnly(row.data ?? row.data_troca);
+  const tipoOleo = row.tipo_oleo || row.oleo || null;
+  return {
+    id: Number(row.id),
+    vehicle_id: vehicleId === null || vehicleId === undefined ? null : Number(vehicleId),
+    veiculo_id: vehicleId === null || vehicleId === undefined ? null : Number(vehicleId),
+    placa: row.placa || null,
+    data,
+    data_troca: data,
+    tipo_oleo: tipoOleo,
+    oleo: tipoOleo,
+    quantidade: row.quantidade === null || row.quantidade === undefined ? null : Number(row.quantidade),
+    hodometro: row.hodometro === null || row.hodometro === undefined ? null : Number(row.hodometro),
+    horimetro: row.horimetro === null || row.horimetro === undefined ? null : Number(row.horimetro),
+    observacoes: row.observacoes || null,
+    created_at: row.created_at || null
+  };
+}
+
+function oilMatches(item, filters) {
+  const data = item.data || '';
+  const month = String(filters.mes ?? filters.month ?? '').replace(/[^0-9]/g, '');
+  const year = String(filters.ano ?? filters.year ?? '').replace(/[^0-9]/g, '');
+  if (month && data.slice(5, 7) !== month.padStart(2, '0')) return false;
+  if (year && data.slice(0, 4) !== year) return false;
+  const vehicleId = filters.vehicle_id ?? filters.veiculo_id;
+  if (vehicleId && Number(item.vehicle_id) !== Number(vehicleId)) return false;
+  if (filters.placa && !String(item.placa || '').toLowerCase().includes(String(filters.placa).toLowerCase())) return false;
+  const search = filters.q || filters.busca;
+  if (search) {
+    const haystack = `${item.placa || ''} ${item.tipo_oleo || ''} ${item.observacoes || ''}`.toLowerCase();
+    if (!haystack.includes(String(search).toLowerCase())) return false;
+  }
+  return true;
+}
+
+async function listOilChanges(filters = {}) {
+  let rows;
+  if (sql) {
+    await ensureNeon();
+    rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes, created_at
+      FROM oil_changes ORDER BY data DESC NULLS LAST, id DESC`;
+  } else {
+    rows = loadFile().oil_changes || [];
+  }
+  return rows.map(publicOilChange).filter((item) => oilMatches(item, filters));
+}
+
+async function completeOilVehicle(data) {
+  if (data.vehicle_id && !data.placa || data.placa && !data.vehicle_id) {
+    const vehicles = await listVehicles();
+    const found = vehicles.find((vehicle) =>
+      (data.vehicle_id && Number(vehicle.id) === Number(data.vehicle_id)) ||
+      (data.placa && String(vehicle.placa || '').toUpperCase() === data.placa)
+    );
+    if (found) {
+      data.vehicle_id = Number(found.id);
+      data.veiculo_id = Number(found.id);
+      data.placa = String(found.placa || data.placa).toUpperCase();
+    }
+  }
+  return data;
+}
+
+async function insertOilChange(body) {
+  const data = await completeOilVehicle(oilChangeData(body));
+  if (!data.vehicle_id && !data.placa) {
+    const error = new Error('Veículo é obrigatório.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (sql) {
+    await ensureNeon();
+    const ids = await sql`SELECT COALESCE(MAX(id), 0) + 1 AS nid FROM oil_changes`;
+    const id = Number(ids[0].nid);
+    await sql`INSERT INTO oil_changes
+      (id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes)
+      VALUES (${id}, ${data.vehicle_id}, ${data.veiculo_id}, ${data.placa}, ${data.data}, ${data.data_troca},
+        ${data.tipo_oleo}, ${data.oleo}, ${data.quantidade}, ${data.hodometro}, ${data.horimetro}, ${data.observacoes})`;
+    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes, created_at
+      FROM oil_changes WHERE id = ${id}`;
+    return publicOilChange(rows[0]);
+  }
+  const arr = loadFile().oil_changes;
+  const item = { id: nextId(arr), ...data, created_at: new Date().toISOString() };
+  arr.push(item);
+  saveFile();
+  return publicOilChange(item);
+}
+
+async function updateOilChange(id, body) {
+  let current;
+  if (sql) {
+    await ensureNeon();
+    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes, created_at
+      FROM oil_changes WHERE id = ${id}`;
+    current = rows[0];
+  } else {
+    current = (loadFile().oil_changes || []).find((item) => Number(item.id) === Number(id));
+  }
+  if (!current) return null;
+  const merged = await completeOilVehicle(oilChangeData({ ...current, ...(body || {}) }));
+  if (!merged.vehicle_id && !merged.placa) {
+    const error = new Error('Veículo é obrigatório.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (sql) {
+    await sql`UPDATE oil_changes SET
+      vehicle_id = ${merged.vehicle_id}, veiculo_id = ${merged.veiculo_id}, placa = ${merged.placa},
+      data = ${merged.data}, data_troca = ${merged.data_troca}, tipo_oleo = ${merged.tipo_oleo}, oleo = ${merged.oleo},
+      quantidade = ${merged.quantidade}, hodometro = ${merged.hodometro}, horimetro = ${merged.horimetro}, observacoes = ${merged.observacoes}
+      WHERE id = ${id}`;
+    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes, created_at
+      FROM oil_changes WHERE id = ${id}`;
+    return publicOilChange(rows[0]);
+  }
+  const arr = loadFile().oil_changes;
+  const index = arr.findIndex((item) => Number(item.id) === Number(id));
+  arr[index] = { ...arr[index], ...merged, id: arr[index].id };
+  saveFile();
+  return publicOilChange(arr[index]);
+}
+
+async function deleteOilChange(id) {
+  if (sql) {
+    await ensureNeon();
+    const rows = await sql`DELETE FROM oil_changes WHERE id = ${id} RETURNING id`;
+    return rows.length > 0;
+  }
+  const arr = loadFile().oil_changes;
+  const index = arr.findIndex((item) => Number(item.id) === Number(id));
+  if (index === -1) return false;
+  arr.splice(index, 1);
+  saveFile();
+  return true;
+}
+
+async function monthlyOilReport(filters = {}) {
+  const now = new Date();
+  const mes = String(filters.mes ?? filters.month ?? now.getUTCMonth() + 1).padStart(2, '0');
+  const ano = String(filters.ano ?? filters.year ?? now.getUTCFullYear());
+  const items = await listOilChanges({ ...filters, mes, ano });
+  const porVeiculo = {};
+  for (const item of items) {
+    const key = item.placa || `Veículo ${item.vehicle_id || 'sem identificação'}`;
+    if (!porVeiculo[key]) porVeiculo[key] = { placa: item.placa, vehicle_id: item.vehicle_id, total: 0, horimetro: 0 };
+    porVeiculo[key].total += 1;
+    porVeiculo[key].horimetro += Number(item.horimetro || 0);
+  }
+  return {
+    mes,
+    ano,
+    periodo: `${ano}-${mes}`,
+    total: items.length,
+    total_trocas: items.length,
+    total_horimetro: items.reduce((sum, item) => sum + Number(item.horimetro || 0), 0),
+    por_veiculo: Object.values(porVeiculo),
+    trocas: items
+  };
+}
 
 async function listVehicles() {
   if (sql) {
@@ -356,7 +584,9 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
     return res.end();
   }
-  const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
+  const requestUrl = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = requestUrl.pathname;
+  const query = Object.fromEntries(requestUrl.searchParams.entries());
 
   try {
     if (pathname.startsWith('/api/')) {
@@ -365,7 +595,8 @@ const server = http.createServer(async (req, res) => {
 
       if (resource === 'status') {
         const vehicles = await listVehicles();
-        return json(res, 200, { online: true, version: VERSION, db: sql ? 'neon' : 'file', counts: { vehicles: vehicles.length } });
+        const oilChanges = await listOilChanges();
+        return json(res, 200, { online: true, version: VERSION, db: sql ? 'neon' : 'file', counts: { vehicles: vehicles.length, oil_changes: oilChanges.length } });
       }
       if (resource === 'data' && req.method === 'GET') {
         return json(res, 200, { vehicles: await listVehicles(), users: (await listUsers()).map(stripSenha) });
@@ -379,6 +610,31 @@ const server = http.createServer(async (req, res) => {
         const user = await checkLogin(body.usuario, body.senha);
         if (!user) return json(res, 401, { error: 'Usuário ou senha incorretos.' });
         return json(res, 200, user);
+      }
+
+      if (resource === 'trocas-oleo' || resource === 'oil-changes') {
+        if (req.method === 'GET' && (parts[1] === 'relatorio' || parts[1] === 'relatorio-mensal')) {
+          return json(res, 200, await monthlyOilReport(query));
+        }
+        if (req.method === 'GET' && !id) return json(res, 200, await listOilChanges(query));
+        if (req.method === 'GET' && id) {
+          const all = await listOilChanges();
+          const item = all.find((change) => Number(change.id) === id);
+          return item ? json(res, 200, item) : json(res, 404, { error: 'Not found' });
+        }
+        if (req.method === 'POST') return json(res, 201, await insertOilChange(await parseBody(req)));
+        if ((req.method === 'PATCH' || req.method === 'PUT') && id) {
+          const upd = await updateOilChange(id, await parseBody(req));
+          return upd ? json(res, 200, upd) : json(res, 404, { error: 'Not found' });
+        }
+        if (req.method === 'DELETE' && id) {
+          return (await deleteOilChange(id)) ? json(res, 200, { success: true }) : json(res, 404, { error: 'Not found' });
+        }
+        return json(res, 405, { error: 'Method not allowed' });
+      }
+
+      if (resource === 'relatorio-mensal' && req.method === 'GET') {
+        return json(res, 200, await monthlyOilReport(query));
       }
 
       if (resource === 'vehicles') {

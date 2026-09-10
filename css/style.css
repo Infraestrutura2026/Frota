@@ -36,11 +36,13 @@ body {
 
 button,
 input,
-select { font: inherit; }
+select,
+textarea { font: inherit; }
 
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 a:focus-visible {
   outline: 3px solid rgba(201, 162, 39, .55);
   outline-offset: 2px;
@@ -189,6 +191,22 @@ a:focus-visible {
   background: #fff;
   font-size: .92rem;
   transition: border-color .15s, box-shadow .15s;
+}
+
+.form-field textarea {
+  width: 100%;
+  padding: 10px 13px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  color: var(--text);
+  background: #fff;
+  resize: vertical;
+}
+
+.form-field textarea:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, .12);
 }
 
 .login-field input::placeholder,
@@ -497,6 +515,34 @@ a:focus-visible {
 .vehicles-toolbar select { min-width: 170px; }
 .vehicle-count { margin-left: auto; color: var(--text-muted); font-size: .78rem; font-weight: 700; }
 
+/* ============ TROCA DE ÓLEO ============ */
+
+.oil-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.oil-summary-card { display: flex; flex-direction: column; gap: 5px; padding: 18px 20px; }
+.summary-label { color: var(--text-muted); font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.oil-summary-card strong { color: var(--navy); font-size: 1.7rem; line-height: 1.1; }
+.oil-summary-card small { color: var(--text-muted); font-size: .75rem; }
+.oil-toolbar { align-items: flex-end; }
+.oil-toolbar input[type="search"] { min-width: 230px; }
+.oil-month-field { display: flex; min-width: 170px; flex-direction: column; gap: 6px; }
+.oil-month-field span { color: var(--text-muted); font-size: .7rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.oil-month-field input { min-height: 46px; padding: 10px 13px; border: 1px solid #d0d5dd; border-radius: 9px; color: var(--text); background: #fff; }
+.oil-month-field input:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 3px rgba(29, 78, 216, .12); }
+.oil-table-card { padding: 0; }
+.oil-list-head { padding: 20px 22px 12px; }
+.oil-table-card .table-responsive { overflow-x: auto; }
+.table-subtitle { display: block; margin-top: 4px; color: var(--text-muted); font-size: .7rem; }
+.oil-report-card { padding: 20px 22px; }
+.oil-report-output { display: flex; flex-direction: column; gap: 13px; margin-top: 14px; color: var(--text-muted); font-size: .82rem; }
+.oil-report-output > div:first-child { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
+.oil-report-output > div:first-child strong { color: var(--navy); font-size: 1.05rem; }
+.report-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.report-chip { padding: 7px 11px; border-radius: 999px; color: var(--primary-dark); background: var(--primary-soft); font-size: .75rem; }
+.report-chip b { margin-right: 4px; }
+.report-muted,
+.report-loading { color: var(--text-muted); font-size: .82rem; }
+.form-field-wide { grid-column: 1 / -1; }
+
 /* ============ MODAL ============ */
 
 .modal { display: none; position: fixed; z-index: 100; inset: 0; }
@@ -552,6 +598,7 @@ a:focus-visible {
   .user-name-text { display: none; }
   .content { padding: 22px 20px 30px; }
   .dashboard-groups { grid-template-columns: 1fr; }
+  .oil-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .vehicles-toolbar input[type="search"] { min-width: 100%; }
   .vehicle-count { margin-left: 0; }
 }
@@ -567,4 +614,9 @@ a:focus-visible {
   .card { padding: 18px 16px; }
   .fleet-group-header { padding-right: 14px; padding-left: 14px; }
   .form-grid { grid-template-columns: 1fr; }
+  .form-field-wide { grid-column: auto; }
+  .oil-summary-grid { grid-template-columns: 1fr; }
+  .oil-toolbar { align-items: stretch; }
+  .oil-toolbar .oil-month-field { width: 100%; }
+  .oil-toolbar .btn { width: 100%; }
 }

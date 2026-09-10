@@ -30,8 +30,10 @@ Frota/
 | `DATABASE_URL` definida (Vercel) | **Neon (Postgres)** — compartilhado entre todos os computadores |
 | Sem `DATABASE_URL` (local dev) | `data/db.json` |
 
-As tabelas (`vehicles`, `users`) são **criadas automaticamente** na primeira
-chamada à API, já com os 29 veículos e o usuário admin.
+As tabelas (`vehicles`, `users` e `oil_changes`) são **criadas automaticamente** na primeira
+chamada à API, já com os 29 veículos e o usuário admin. A tabela de trocas de óleo
+inclui o campo `horimetro`; em bancos Neon existentes ele também é adicionado
+automaticamente, sem migração manual.
 
 ## 🚀 Executar localmente
 
@@ -65,5 +67,9 @@ Acesse `http://localhost:8080` — login: **admin / admin2025**
 | PATCH/PUT    | `/api/vehicles/:id` | Atualiza um veículo            |
 | DELETE       | `/api/vehicles/:id` | Exclui um veículo              |
 | idem         | `/api/users`        | Mesmas operações p/ usuários   |
+| GET          | `/api/trocas-oleo`  | Lista trocas de óleo           |
+| POST         | `/api/trocas-oleo`  | Registra uma troca de óleo     |
+| PATCH/DELETE | `/api/trocas-oleo/:id` | Edita/exclui um registro    |
+| GET          | `/api/trocas-oleo/relatorio-mensal` | Relatório mensal |
 
 > 🔒 Senhas ficam hasheadas (SHA-256) e nunca são retornadas pela API.
