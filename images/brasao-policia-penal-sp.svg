@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1100">
+  <title>Brasão da Polícia Penal do Estado de São Paulo</title>
+  <defs>
+    <linearGradient id="ouro" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e3c878"/>
+      <stop offset=".45" stop-color="#c9a44e"/>
+      <stop offset="1" stop-color="#a9853a"/>
+    </linearGradient>
+    <linearGradient id="prata" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f5f8"/>
+      <stop offset=".5" stop-color="#c9cedb"/>
+      <stop offset="1" stop-color="#9aa0b1"/>
+    </linearGradient>
+    <linearGradient id="vermelho" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cf3340"/>
+      <stop offset="1" stop-color="#9e1b26"/>
+    </linearGradient>
+    <path id="escudo" d="
+      M500 26
+      L432 86
+      L372 68
+      L250 128
+      C196 168 172 250 168 360
+      C158 610 214 832 500 1068
+      C786 832 842 610 832 360
+      C828 250 804 168 750 128
+      L628 68
+      L568 86
+      Z"/>
+    <clipPath id="clipEscudo"><use href="#escudo"/></clipPath>
+  </defs>
+
+  <!-- moldura dourada + campo negro do escudo -->
+  <use href="#escudo" fill="url(#ouro)"/>
+  <use href="#escudo" fill="#0d0d11" transform="translate(500 547) scale(.957) translate(-500 -547)"/>
+
+  <!-- faixa superior POLÍCIA -->
+  <g stroke="#80632a" stroke-width="3" stroke-linejoin="round">
+    <polygon points="236,214 132,198 158,254 134,312 236,298" fill="url(#ouro)"/>
+    <polygon points="764,214 868,198 842,254 866,312 764,298" fill="url(#ouro)"/>
+    <path d="M232 214 Q500 182 768 214 L768 300 Q500 330 232 300 Z" fill="url(#ouro)"/>
+    <polyline points="132,198 158,254 134,312" fill="none" stroke-width="3"/>
+    <polyline points="868,198 842,254 866,312" fill="none" stroke-width="3"/>
+  </g>
+
+  <!-- ramos de café/louro -->
+  <g stroke="#2c4d25" stroke-width="2.4" fill="#4a7c3f">
+    <g>
+      <path d="M500 712 C452 690 392 632 366 528 C352 470 358 424 378 398" fill="none" stroke="#33592b" stroke-width="7"/>
+      <!-- folhas esquerdas -->
+      <ellipse cx="372" cy="412" rx="11" ry="26" transform="rotate(-28 372 412)"/>
+      <ellipse cx="356" cy="460" rx="11" ry="27" transform="rotate(-52 356 460)"/>
+      <ellipse cx="358" cy="512" rx="11" ry="27" transform="rotate(-74 358 512)"/>
+      <ellipse cx="376" cy="562" rx="11" ry="26" transform="rotate(-98 376 562)"/>
+      <ellipse cx="404" cy="608" rx="11" ry="25" transform="rotate(-122 404 608)"/>
+      <ellipse cx="438" cy="648" rx="11" ry="24" transform="rotate(-146 438 648)"/>
+      <ellipse cx="472" cy="678" rx="10" ry="22" transform="rotate(-168 472 678)"/>
+      <ellipse cx="396" cy="432" rx="10" ry="24" transform="rotate(8 396 432)"/>
+      <ellipse cx="384" cy="486" rx="10" ry="25" transform="rotate(-16 384 486)"/>
+      <ellipse cx="392" cy="540" rx="10" ry="25" transform="rotate(-42 392 540)"/>
+      <ellipse cx="418" cy="590" rx="10" ry="24" transform="rotate(-70 418 590)"/>
+      <ellipse cx="452" cy="634" rx="10" ry="23" transform="rotate(-108 452 634)"/>
+    </g>
+    <g>
+      <path d="M500 712 C548 690 608 632 634 528 C648 470 642 424 622 398" fill="none" stroke="#33592b" stroke-width="7"/>
+      <!-- folhas direitas -->
+      <ellipse cx="628" cy="412" rx="11" ry="26" transform="rotate(28 628 412)"/>
+      <ellipse cx="644" cy="460" rx="11" ry="27" transform="rotate(52 644 460)"/>
+      <ellipse cx="642" cy="512" rx="11" ry="27" transform="rotate(74 642 512)"/>
+      <ellipse cx="624" cy="562" rx="11" ry="26" transform="rotate(98 624 562)"/>
+      <ellipse cx="596" cy="608" rx="11" ry="25" transform="rotate(122 596 608)"/>
+      <ellipse cx="562" cy="648" rx="11" ry="24" transform="rotate(146 562 648)"/>
+      <ellipse cx="528" cy="678" rx="10" ry="22" transform="rotate(168 528 678)"/>
+      <ellipse cx="604" cy="432" rx="10" ry="24" transform="rotate(-8 604 432)"/>
+      <ellipse cx="616" cy="486" rx="10" ry="25" transform="rotate(16 616 486)"/>
+      <ellipse cx="608" cy="540" rx="10" ry="25" transform="rotate(42 608 540)"/>
+      <ellipse cx="582" cy="590" rx="10" ry="24" transform="rotate(70 582 590)"/>
+      <ellipse cx="548" cy="634" rx="10" ry="23" transform="rotate(108 548 634)"/>
+    </g>
+    <!-- frutos dourados -->
+    <g fill="#e0bd57" stroke="#8a6b24">
+      <circle cx="366" cy="442" r="5"/><circle cx="380" cy="452" r="5"/><circle cx="360" cy="470" r="5"/>
+      <circle cx="370" cy="522" r="5"/><circle cx="386" cy="532" r="5"/><circle cx="378" cy="552" r="5"/>
+      <circle cx="634" cy="442" r="5"/><circle cx="620" cy="452" r="5"/><circle cx="640" cy="470" r="5"/>
+      <circle cx="630" cy="522" r="5"/><circle cx="614" cy="532" r="5"/><circle cx="622" cy="552" r="5"/>
+    </g>
+  </g>
+
+  <!-- estrela de prata -->
+  <polygon points="500,318 515,360 560,360 523,386 537,428 500,402 463,428 477,386 440,360 485,360"
+           fill="url(#prata)" stroke="#7b8194" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- escudo central vermelho (brasão do estado) -->
+  <path d="M500 430
+           C430 430 372 448 362 486
+           C350 532 372 572 388 600
+           C410 642 452 672 500 706
+           C548 672 590 642 612 600
+           C628 572 650 532 638 486
+           C628 448 570 430 500 430 Z"
+        fill="url(#vermelho)" stroke="#6f131c" stroke-width="7" stroke-linejoin="round"/>
+
+  <!-- espada de prata -->
+  <g>
+    <path d="M500 452 L489 596 L511 596 Z" fill="url(#prata)" stroke="#6f7588" stroke-width="2"/>
+    <line x1="500" y1="462" x2="500" y2="590" stroke="#ffffff" stroke-width="2" opacity=".7"/>
+    <rect x="470" y="594" width="60" height="13" rx="4" fill="url(#prata)" stroke="#6f7588" stroke-width="2"/>
+    <rect x="493" y="607" width="14" height="30" rx="3" fill="#d9b253" stroke="#8a6b24" stroke-width="2"/>
+    <circle cx="500" cy="646" r="10" fill="url(#prata)" stroke="#6f7588" stroke-width="2"/>
+  </g>
+
+  <!-- letras S P -->
+  <g fill="#f7f7f5" stroke="#8a8f9c" stroke-width="1.5"
+     font-family="DejaVu Serif, Georgia, 'Times New Roman', serif" font-weight="bold" font-size="128">
+    <text x="427" y="572" text-anchor="middle">S</text>
+    <text x="573" y="572" text-anchor="middle">P</text>
+  </g>
+
+  <!-- palmas de prata dentro do escudete -->
+  <g fill="#e9e9e6" stroke="#9aa0ab" stroke-width="1.2">
+    <g>
+      <ellipse cx="444" cy="636" rx="4.5" ry="15" transform="rotate(-122 444 636)"/>
+      <ellipse cx="462" cy="652" rx="4.5" ry="15" transform="rotate(-142 462 652)"/>
+      <ellipse cx="480" cy="663" rx="4.5" ry="14" transform="rotate(-162 480 663)"/>
+      <ellipse cx="430" cy="614" rx="4.5" ry="14" transform="rotate(-104 430 614)"/>
+      <ellipse cx="423" cy="590" rx="4" ry="12" transform="rotate(-90 423 590)"/>
+    </g>
+    <g>
+      <ellipse cx="556" cy="636" rx="4.5" ry="15" transform="rotate(122 556 636)"/>
+      <ellipse cx="538" cy="652" rx="4.5" ry="15" transform="rotate(142 538 652)"/>
+      <ellipse cx="520" cy="663" rx="4.5" ry="14" transform="rotate(162 520 663)"/>
+      <ellipse cx="570" cy="614" rx="4.5" ry="14" transform="rotate(104 570 614)"/>
+      <ellipse cx="577" cy="590" rx="4" ry="12" transform="rotate(90 577 590)"/>
+    </g>
+  </g>
+
+  <!-- listel vermelho com o lema -->
+  <g>
+    <polygon points="310,708 268,692 276,724 268,756 310,742" fill="url(#vermelho)" stroke="#6f131c" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="690,708 732,692 724,724 732,756 690,742" fill="url(#vermelho)" stroke="#6f131c" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M306 706 Q500 664 694 706 L694 744 Q500 702 306 744 Z"
+          fill="url(#vermelho)" stroke="#6f131c" stroke-width="3" stroke-linejoin="round"/>
+    <text x="500" y="733" text-anchor="middle"
+          font-family="DejaVu Serif, Georgia, 'Times New Roman', serif" font-weight="bold"
+          font-size="21" letter-spacing="2" fill="#f0d68c">PRO BRASILIA FIANT EXIMIA</text>
+  </g>
+
+  <!-- pontas douradas decorativas laterais -->
+  <polygon points="250,770 200,728 286,758" fill="url(#ouro)" stroke="#80632a" stroke-width="2.5" stroke-linejoin="round"/>
+  <polygon points="750,770 800,728 714,758" fill="url(#ouro)" stroke="#80632a" stroke-width="2.5" stroke-linejoin="round"/>
+
+  <!-- faixa inferior PENAL -->
+  <g stroke="#80632a" stroke-width="3" stroke-linejoin="round">
+    <polygon points="236,806 134,792 156,846 130,902 236,892" fill="url(#ouro)"/>
+    <polygon points="764,806 866,792 844,846 870,902 764,892" fill="url(#ouro)"/>
+    <path d="M232 806 Q500 780 768 806 L768 892 Q500 918 232 892 Z" fill="url(#ouro)"/>
+    <polyline points="134,792 156,846 130,902" fill="none"/>
+    <polyline points="866,792 844,846 870,902" fill="none"/>
+  </g>
+
+  <!-- textos das faixas -->
+  <g fill="#14110a" font-family="DejaVu Serif, Georgia, 'Times New Roman', serif" font-weight="bold"
+     text-anchor="middle" letter-spacing="10">
+    <text x="500" y="279" font-size="82">POLÍCIA</text>
+    <text x="500" y="873" font-size="86">PENAL</text>
+  </g>
+
+  <!-- SP na ponta -->
+  <text x="500" y="1000" text-anchor="middle"
+        font-family="DejaVu Serif, Georgia, 'Times New Roman', serif" font-weight="bold"
+        font-size="62" fill="url(#ouro)" stroke="#5f4a1c" stroke-width="1.5">SP</text>
+</svg>

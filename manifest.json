@@ -10,7 +10,7 @@
   "theme_color": "#0f172a",
   "icons": [
     {
-      "src": "images/brasao-policia-penal-sp.png",
+      "src": "images/brasao-policia-penal-sp-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
