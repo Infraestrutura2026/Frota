@@ -65,6 +65,9 @@
         <button type="button" class="nav-item" data-page="vehicles">
           <span class="nav-icon" aria-hidden="true">▤</span> Veículos
         </button>
+        <button type="button" class="nav-item" data-page="oil-changes">
+          <span class="nav-icon" aria-hidden="true">◉</span> Troca de Óleo
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -133,7 +136,88 @@
           </div>
           <div class="vehicles-groups" id="vehicles-groups"></div>
         </section>
+
+        <!-- ===== Página: Troca de Óleo ===== -->
+        <section class="page-section" id="page-oil-changes">
+          <div class="section-head">
+            <div>
+              <span class="section-kicker">Manutenção preventiva</span>
+              <h3>Troca de Óleo</h3>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="App.openOilModal()">＋ Registrar troca</button>
+          </div>
+
+          <div class="oil-summary-grid">
+            <div class="card oil-summary-card"><span class="summary-label">Registros no período</span><strong id="oil-summary-total">0</strong><small>trocas de óleo</small></div>
+            <div class="card oil-summary-card"><span class="summary-label">Veículos atendidos</span><strong id="oil-summary-vehicles">0</strong><small>veículos</small></div>
+            <div class="card oil-summary-card"><span class="summary-label">Horímetro informado</span><strong id="oil-summary-hours">0</strong><small>horas acumuladas</small></div>
+          </div>
+
+          <div class="vehicles-toolbar card oil-toolbar">
+            <input type="search" id="oil-search" placeholder="Buscar por placa, óleo ou observação…" aria-label="Buscar troca de óleo">
+            <label class="oil-month-field"><span>Mês de referência</span><input type="month" id="oil-month-filter" aria-label="Filtrar por mês"></label>
+            <span class="vehicle-count" id="oil-count">0 registro(s)</span>
+            <button type="button" class="btn" onclick="App.loadOilReport()">Relatório mensal</button>
+          </div>
+
+          <div class="card oil-table-card">
+            <div class="section-head oil-list-head"><div><span class="section-kicker">Histórico</span><h3>Registros de troca</h3></div></div>
+            <div class="table-responsive" id="oil-changes-list"></div>
+          </div>
+
+          <div class="card oil-report-card">
+            <div class="section-head"><div><span class="section-kicker">Acompanhamento</span><h3>Relatório mensal</h3></div></div>
+            <div id="oil-report-output" class="oil-report-output"><span class="report-muted">Selecione um mês e clique em “Relatório mensal”.</span></div>
+          </div>
+        </section>
       </main>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: Troca de Óleo ================= -->
+  <div class="modal" id="oil-modal">
+    <div class="modal-backdrop" onclick="App.closeModal('oil-modal')"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="oil-modal-title">
+      <div class="modal-header">
+        <h3 id="oil-modal-title">Registrar Troca de Óleo</h3>
+        <button type="button" class="btn btn-icon" title="Fechar" aria-label="Fechar" onclick="App.closeModal('oil-modal')">✕</button>
+      </div>
+      <form id="oil-form" onsubmit="event.preventDefault(); App.saveOilChange();">
+        <div class="form-grid">
+          <label class="form-field">
+            <span>Veículo *</span>
+            <select id="oil-vehicle" name="vehicle_id" required></select>
+          </label>
+          <label class="form-field">
+            <span>Data da troca *</span>
+            <input type="date" id="oil-data" name="data" required>
+          </label>
+          <label class="form-field">
+            <span>Tipo de óleo</span>
+            <input type="text" id="oil-tipo" name="tipo_oleo" placeholder="5W30, 15W40…">
+          </label>
+          <label class="form-field">
+            <span>Quantidade (litros)</span>
+            <input type="number" id="oil-quantidade" name="quantidade" min="0" step="0.1" placeholder="0">
+          </label>
+          <label class="form-field">
+            <span>Hodômetro (km)</span>
+            <input type="number" id="oil-hodometro" name="hodometro" min="0" placeholder="0">
+          </label>
+          <label class="form-field">
+            <span>Horímetro (h)</span>
+            <input type="number" id="oil-horimetro" name="horimetro" min="0" placeholder="0">
+          </label>
+          <label class="form-field form-field-wide">
+            <span>Observações</span>
+            <textarea id="oil-observacoes" name="observacoes" rows="3" placeholder="Informe filtros, oficina ou outras observações"></textarea>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn" onclick="App.closeModal('oil-modal')">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Salvar registro</button>
+        </div>
+      </form>
     </div>
   </div>
 
