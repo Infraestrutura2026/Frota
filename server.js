@@ -21,7 +21,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.4';
+const VERSION = '3.5';
 
 // Hash legado mantido para compatibilidade com bancos antigos.
 const LEGACY_ADMIN_HASH = 'e6c2797fed87dd7a39f60bcfe65cf34645229671607ef506720d20d41f173b2a';
@@ -112,6 +112,35 @@ function ensureNeon() {
         created_at TIMESTAMPTZ DEFAULT now()
       )`;
       await sql`ALTER TABLE oil_changes ADD COLUMN IF NOT EXISTS horimetro INTEGER`;
+      // Módulo Manutenção (ordens de serviço) — a Troca de Óleo é um tipo.
+      await sql`CREATE TABLE IF NOT EXISTS manutencoes (
+        id INTEGER PRIMARY KEY,
+        vehicle_id INTEGER, veiculo_id INTEGER, placa TEXT,
+        tipo TEXT,
+        data DATE, data_saida DATE,
+        hodometro INTEGER, proxima_manutencao INTEGER,
+        servico TEXT, itens TEXT, oficina TEXT,
+        custo NUMERIC, status_os TEXT,
+        tipo_oleo TEXT, quantidade NUMERIC,
+        observacoes TEXT,
+        created_at TIMESTAMPTZ DEFAULT now()
+      )`;
+      await sql`CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      )`;
+      // Migração única: traz as trocas de óleo antigas para o novo módulo.
+      const migrated = await sql`SELECT value FROM meta WHERE key = 'oil_migrated'`;
+      if (migrated.length === 0) {
+        await sql`INSERT INTO manutencoes
+          (id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at)
+          SELECT id, COALESCE(vehicle_id, veiculo_id), COALESCE(vehicle_id, veiculo_id), placa,
+            'TROCA DE ÓLEO', COALESCE(data, data_troca), NULL, hodometro, NULL,
+            'Troca de óleo', NULL, NULL, NULL, 'CONCLUÍDA',
+            COALESCE(tipo_oleo, oleo), quantidade, observacoes, created_at
+          FROM oil_changes ON CONFLICT (id) DO NOTHING`;
+        await sql`INSERT INTO meta (key, value) VALUES ('oil_migrated', '1') ON CONFLICT (key) DO NOTHING`;
+      }
       const vc = await sql`SELECT COUNT(*)::int AS n FROM vehicles`;
       if (vc[0].n === 0) {
         for (const v of INITIAL_VEHICLES) {
@@ -138,7 +167,7 @@ function loadFile() {
   if (dbFile) return dbFile;
   if (!fs.existsSync(DATA_DIR)) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {} }
   if (!fs.existsSync(DB_FILE)) {
-    const initial = { vehicles: INITIAL_VEHICLES, users: INITIAL_USERS, oil_changes: [] };
+    const initial = { vehicles: INITIAL_VEHICLES, users: INITIAL_USERS, oil_changes: [], manutencoes: [] };
     try { fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2)); } catch {}
     dbFile = initial;
     return dbFile;
@@ -148,9 +177,32 @@ function loadFile() {
     if (!Array.isArray(data.vehicles) || data.vehicles.length === 0) data.vehicles = INITIAL_VEHICLES;
     if (!Array.isArray(data.users)) data.users = INITIAL_USERS;
     if (!Array.isArray(data.oil_changes)) data.oil_changes = [];
+    // Migração única do modo arquivo: trocas de óleo antigas viram manutenções.
+    if (!Array.isArray(data.manutencoes)) {
+      data.manutencoes = (data.oil_changes || []).map((c) => ({
+        id: Number(c.id),
+        vehicle_id: c.vehicle_id ?? c.veiculo_id ?? null,
+        veiculo_id: c.vehicle_id ?? c.veiculo_id ?? null,
+        placa: c.placa || null,
+        tipo: 'TROCA DE ÓLEO',
+        data: dateOnly(c.data ?? c.data_troca),
+        data_saida: null,
+        hodometro: c.hodometro ?? null,
+        proxima_manutencao: null,
+        servico: 'Troca de óleo',
+        itens: null,
+        oficina: null,
+        custo: null,
+        status_os: 'CONCLUÍDA',
+        tipo_oleo: c.tipo_oleo || c.oleo || null,
+        quantidade: c.quantidade ?? null,
+        observacoes: c.observacoes || null,
+        created_at: c.created_at || new Date().toISOString()
+      }));
+    }
     dbFile = data;
   } catch {
-    dbFile = { vehicles: INITIAL_VEHICLES, users: INITIAL_USERS, oil_changes: [] };
+    dbFile = { vehicles: INITIAL_VEHICLES, users: INITIAL_USERS, oil_changes: [], manutencoes: [] };
   }
   return dbFile;
 }
@@ -162,7 +214,7 @@ function saveFile() {
 // ---------- Operações unificadas ----------
 
 const V_COLS = 'id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade';
-const OIL_COLS = 'id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes, created_at';
+const MAN_COLS = 'id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at';
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
@@ -182,32 +234,55 @@ function numberOrNull(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function oilChangeData(body) {
+// ============================================================
+// Manutenções (ordens de serviço) — a Troca de Óleo é um tipo
+// ============================================================
+
+const MAN_TIPOS = ['PREVENTIVA', 'CORRETIVA', 'EMERGENCIAL', 'REVISÃO', 'RECALL', 'TROCA DE ÓLEO'];
+const MAN_STATUS = ['EM ANDAMENTO', 'CONCLUÍDA', 'AGUARDANDO PEÇA', 'CANCELADA'];
+
+function manutencaoData(body) {
   body = body || {};
   const vehicleId = intOrNull(body.vehicle_id ?? body.veiculo_id ?? body.vehicleId ?? body.veiculoId);
   const placa = String(body.placa || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || null;
-  const data = dateOnly(body.data ?? body.data_troca ?? body.date ?? body.dataTroca) || todayISO();
-  const tipoOleo = String(body.tipo_oleo ?? body.oleo ?? body.tipoOleo ?? '').trim().toUpperCase() || null;
-  const quantidade = numberOrNull(body.quantidade ?? body.litros ?? body.quantity);
+  const rawTipo = String(body.tipo || '').trim().toUpperCase();
+  const tipo = MAN_TIPOS.includes(rawTipo) ? rawTipo : 'PREVENTIVA';
+  const data = dateOnly(body.data ?? body.data_entrada ?? body.data_troca ?? body.date) || todayISO();
+  const dataSaida = dateOnly(body.data_saida ?? body.dataSaida);
   const hodometro = intOrNull(body.hodometro ?? body.km ?? body.mileage);
-  const horimetro = intOrNull(body.horimetro ?? body.horas ?? body.hours);
+  const proxima = intOrNull(body.proxima_manutencao ?? body.proximaManutencao ?? body.proxima);
+  const servico = body.servico ?? body.descricao ?? null;
+  const itens = body.itens ?? body.pecas ?? null;
+  const oficina = body.oficina ?? body.responsavel ?? null;
+  const custo = numberOrNull(body.custo ?? body.valor ?? body.cost);
+  const rawStatus = String(body.status_os ?? body.statusOs ?? 'CONCLUÍDA').trim().toUpperCase();
+  const statusOs = MAN_STATUS.includes(rawStatus) ? rawStatus : 'CONCLUÍDA';
+  const tipoOleo = String(body.tipo_oleo ?? body.oleo ?? '').trim().toUpperCase() || null;
+  const quantidade = numberOrNull(body.quantidade ?? body.litros ?? body.quantity);
   const observacoes = body.observacoes ?? body.observacao ?? body.notes ?? null;
   return {
     vehicle_id: vehicleId,
     veiculo_id: vehicleId,
     placa,
+    tipo,
     data,
-    data_troca: data,
+    data_entrada: data,
+    data_saida: dataSaida,
+    hodometro,
+    proxima_manutencao: proxima,
+    servico: servico ? String(servico).trim() : null,
+    itens: itens ? String(itens).trim() : null,
+    oficina: oficina ? String(oficina).trim() : null,
+    custo,
+    status_os: statusOs,
     tipo_oleo: tipoOleo,
     oleo: tipoOleo,
     quantidade,
-    hodometro,
-    horimetro,
     observacoes: observacoes ? String(observacoes).trim() : null
   };
 }
 
-function publicOilChange(row) {
+function publicManutencao(row) {
   if (!row) return null;
   const vehicleId = row.vehicle_id ?? row.veiculo_id;
   const data = dateOnly(row.data ?? row.data_troca);
@@ -217,49 +292,58 @@ function publicOilChange(row) {
     vehicle_id: vehicleId === null || vehicleId === undefined ? null : Number(vehicleId),
     veiculo_id: vehicleId === null || vehicleId === undefined ? null : Number(vehicleId),
     placa: row.placa || null,
+    tipo: row.tipo || null,
     data,
-    data_troca: data,
+    data_entrada: data,
+    data_saida: dateOnly(row.data_saida),
+    hodometro: numberOrNull(row.hodometro),
+    proxima_manutencao: numberOrNull(row.proxima_manutencao),
+    servico: row.servico || null,
+    itens: row.itens || null,
+    oficina: row.oficina || null,
+    custo: numberOrNull(row.custo),
+    status_os: row.status_os || null,
     tipo_oleo: tipoOleo,
     oleo: tipoOleo,
-    quantidade: row.quantidade === null || row.quantidade === undefined ? null : Number(row.quantidade),
-    hodometro: row.hodometro === null || row.hodometro === undefined ? null : Number(row.hodometro),
-    horimetro: row.horimetro === null || row.horimetro === undefined ? null : Number(row.horimetro),
+    quantidade: numberOrNull(row.quantidade),
     observacoes: row.observacoes || null,
     created_at: row.created_at || null
   };
 }
 
-function oilMatches(item, filters) {
+function manutencaoMatches(item, filters) {
   const data = item.data || '';
   const month = String(filters.mes ?? filters.month ?? '').replace(/[^0-9]/g, '');
   const year = String(filters.ano ?? filters.year ?? '').replace(/[^0-9]/g, '');
   if (month && data.slice(5, 7) !== month.padStart(2, '0')) return false;
   if (year && data.slice(0, 4) !== year) return false;
+  if (filters.tipo && String(item.tipo || '').toUpperCase() !== String(filters.tipo).toUpperCase()) return false;
+  if (filters.status_os && String(item.status_os || '').toUpperCase() !== String(filters.status_os).toUpperCase()) return false;
   const vehicleId = filters.vehicle_id ?? filters.veiculo_id;
   if (vehicleId && Number(item.vehicle_id) !== Number(vehicleId)) return false;
   if (filters.placa && !String(item.placa || '').toLowerCase().includes(String(filters.placa).toLowerCase())) return false;
   const search = filters.q || filters.busca;
   if (search) {
-    const haystack = `${item.placa || ''} ${item.tipo_oleo || ''} ${item.observacoes || ''}`.toLowerCase();
+    const haystack = `${item.placa || ''} ${item.servico || ''} ${item.tipo_oleo || ''} ${item.oficina || ''} ${item.observacoes || ''}`.toLowerCase();
     if (!haystack.includes(String(search).toLowerCase())) return false;
   }
   return true;
 }
 
-async function listOilChanges(filters = {}) {
+async function listManutencoes(filters = {}) {
   let rows;
   if (sql) {
     await ensureNeon();
-    rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes, created_at
-      FROM oil_changes ORDER BY data DESC NULLS LAST, id DESC`;
+    rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at
+      FROM manutencoes ORDER BY data DESC NULLS LAST, id DESC`;
   } else {
-    rows = loadFile().oil_changes || [];
+    rows = loadFile().manutencoes || [];
   }
-  return rows.map(publicOilChange).filter((item) => oilMatches(item, filters));
+  return rows.map(publicManutencao).filter((item) => manutencaoMatches(item, filters));
 }
 
-async function completeOilVehicle(data) {
-  if (data.vehicle_id && !data.placa || data.placa && !data.vehicle_id) {
+async function completeManutencaoVehicle(data) {
+  if ((data.vehicle_id && !data.placa) || (data.placa && !data.vehicle_id)) {
     const vehicles = await listVehicles();
     const found = vehicles.find((vehicle) =>
       (data.vehicle_id && Number(vehicle.id) === Number(data.vehicle_id)) ||
@@ -274,73 +358,88 @@ async function completeOilVehicle(data) {
   return data;
 }
 
-async function insertOilChange(body) {
-  const data = await completeOilVehicle(oilChangeData(body));
+async function insertManutencao(body) {
+  const data = await completeManutencaoVehicle(manutencaoData(body));
   if (!data.vehicle_id && !data.placa) {
     const error = new Error('Veículo é obrigatório.');
     error.statusCode = 400;
     throw error;
   }
+  if (data.tipo === 'TROCA DE ÓLEO' && !data.servico) data.servico = 'Troca de óleo';
+  if (data.tipo !== 'TROCA DE ÓLEO' && !data.servico) {
+    const error = new Error('Serviço/descrição é obrigatório.');
+    error.statusCode = 400;
+    throw error;
+  }
   if (sql) {
     await ensureNeon();
-    const ids = await sql`SELECT COALESCE(MAX(id), 0) + 1 AS nid FROM oil_changes`;
+    const ids = await sql`SELECT COALESCE(MAX(id), 0) + 1 AS nid FROM manutencoes`;
     const id = Number(ids[0].nid);
-    await sql`INSERT INTO oil_changes
-      (id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes)
-      VALUES (${id}, ${data.vehicle_id}, ${data.veiculo_id}, ${data.placa}, ${data.data}, ${data.data_troca},
-        ${data.tipo_oleo}, ${data.oleo}, ${data.quantidade}, ${data.hodometro}, ${data.horimetro}, ${data.observacoes})`;
-    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes, created_at
-      FROM oil_changes WHERE id = ${id}`;
-    return publicOilChange(rows[0]);
+    await sql`INSERT INTO manutencoes
+      (id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes)
+      VALUES (${id}, ${data.vehicle_id}, ${data.veiculo_id}, ${data.placa}, ${data.tipo}, ${data.data}, ${data.data_saida},
+        ${data.hodometro}, ${data.proxima_manutencao}, ${data.servico}, ${data.itens}, ${data.oficina}, ${data.custo},
+        ${data.status_os}, ${data.tipo_oleo}, ${data.quantidade}, ${data.observacoes})`;
+    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at
+      FROM manutencoes WHERE id = ${id}`;
+    return publicManutencao(rows[0]);
   }
-  const arr = loadFile().oil_changes;
+  const arr = loadFile().manutencoes;
   const item = { id: nextId(arr), ...data, created_at: new Date().toISOString() };
   arr.push(item);
   saveFile();
-  return publicOilChange(item);
+  return publicManutencao(item);
 }
 
-async function updateOilChange(id, body) {
+async function updateManutencao(id, body) {
   let current;
   if (sql) {
     await ensureNeon();
-    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes, created_at
-      FROM oil_changes WHERE id = ${id}`;
+    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at
+      FROM manutencoes WHERE id = ${id}`;
     current = rows[0];
   } else {
-    current = (loadFile().oil_changes || []).find((item) => Number(item.id) === Number(id));
+    current = (loadFile().manutencoes || []).find((item) => Number(item.id) === Number(id));
   }
   if (!current) return null;
-  const merged = await completeOilVehicle(oilChangeData({ ...current, ...(body || {}) }));
+  const merged = await completeManutencaoVehicle(manutencaoData({ ...current, ...(body || {}) }));
   if (!merged.vehicle_id && !merged.placa) {
     const error = new Error('Veículo é obrigatório.');
     error.statusCode = 400;
     throw error;
   }
-  if (sql) {
-    await sql`UPDATE oil_changes SET
-      vehicle_id = ${merged.vehicle_id}, veiculo_id = ${merged.veiculo_id}, placa = ${merged.placa},
-      data = ${merged.data}, data_troca = ${merged.data_troca}, tipo_oleo = ${merged.tipo_oleo}, oleo = ${merged.oleo},
-      quantidade = ${merged.quantidade}, hodometro = ${merged.hodometro}, horimetro = ${merged.horimetro}, observacoes = ${merged.observacoes}
-      WHERE id = ${id}`;
-    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, data, data_troca, tipo_oleo, oleo, quantidade, hodometro, horimetro, observacoes, created_at
-      FROM oil_changes WHERE id = ${id}`;
-    return publicOilChange(rows[0]);
+  if (merged.tipo === 'TROCA DE ÓLEO' && !merged.servico) merged.servico = 'Troca de óleo';
+  if (merged.tipo !== 'TROCA DE ÓLEO' && !merged.servico) {
+    const error = new Error('Serviço/descrição é obrigatório.');
+    error.statusCode = 400;
+    throw error;
   }
-  const arr = loadFile().oil_changes;
+  if (sql) {
+    await sql`UPDATE manutencoes SET
+      vehicle_id = ${merged.vehicle_id}, veiculo_id = ${merged.veiculo_id}, placa = ${merged.placa},
+      tipo = ${merged.tipo}, data = ${merged.data}, data_saida = ${merged.data_saida},
+      hodometro = ${merged.hodometro}, proxima_manutencao = ${merged.proxima_manutencao},
+      servico = ${merged.servico}, itens = ${merged.itens}, oficina = ${merged.oficina}, custo = ${merged.custo},
+      status_os = ${merged.status_os}, tipo_oleo = ${merged.tipo_oleo}, quantidade = ${merged.quantidade}, observacoes = ${merged.observacoes}
+      WHERE id = ${id}`;
+    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at
+      FROM manutencoes WHERE id = ${id}`;
+    return publicManutencao(rows[0]);
+  }
+  const arr = loadFile().manutencoes;
   const index = arr.findIndex((item) => Number(item.id) === Number(id));
   arr[index] = { ...arr[index], ...merged, id: arr[index].id };
   saveFile();
-  return publicOilChange(arr[index]);
+  return publicManutencao(arr[index]);
 }
 
-async function deleteOilChange(id) {
+async function deleteManutencao(id) {
   if (sql) {
     await ensureNeon();
-    const rows = await sql`DELETE FROM oil_changes WHERE id = ${id} RETURNING id`;
+    const rows = await sql`DELETE FROM manutencoes WHERE id = ${id} RETURNING id`;
     return rows.length > 0;
   }
-  const arr = loadFile().oil_changes;
+  const arr = loadFile().manutencoes;
   const index = arr.findIndex((item) => Number(item.id) === Number(id));
   if (index === -1) return false;
   arr.splice(index, 1);
@@ -348,17 +447,23 @@ async function deleteOilChange(id) {
   return true;
 }
 
+// ---------- Compatibilidade: Troca de Óleo (alias sobre manutenções) ----------
+const listOilChanges = (filters = {}) => listManutencoes({ ...filters, tipo: 'TROCA DE ÓLEO' });
+const insertOilChange = (body) => insertManutencao({ ...(body || {}), tipo: 'TROCA DE ÓLEO' });
+const updateOilChange = (id, body) => updateManutencao(id, { ...(body || {}), tipo: 'TROCA DE ÓLEO' });
+const deleteOilChange = deleteManutencao;
+
 async function monthlyOilReport(filters = {}) {
   const now = new Date();
   const mes = String(filters.mes ?? filters.month ?? now.getUTCMonth() + 1).padStart(2, '0');
   const ano = String(filters.ano ?? filters.year ?? now.getUTCFullYear());
-  const items = await listOilChanges({ ...filters, mes, ano });
+  const items = await listManutencoes({ ...filters, tipo: 'TROCA DE ÓLEO', mes, ano });
   const porVeiculo = {};
   for (const item of items) {
     const key = item.placa || `Veículo ${item.vehicle_id || 'sem identificação'}`;
-    if (!porVeiculo[key]) porVeiculo[key] = { placa: item.placa, vehicle_id: item.vehicle_id, total: 0, horimetro: 0 };
+    if (!porVeiculo[key]) porVeiculo[key] = { placa: item.placa, vehicle_id: item.vehicle_id, total: 0, quantidade: 0 };
     porVeiculo[key].total += 1;
-    porVeiculo[key].horimetro += Number(item.horimetro || 0);
+    porVeiculo[key].quantidade += Number(item.quantidade || 0);
   }
   return {
     mes,
@@ -366,7 +471,7 @@ async function monthlyOilReport(filters = {}) {
     periodo: `${ano}-${mes}`,
     total: items.length,
     total_trocas: items.length,
-    total_horimetro: items.reduce((sum, item) => sum + Number(item.horimetro || 0), 0),
+    total_quantidade: items.reduce((sum, item) => sum + Number(item.quantidade || 0), 0),
     por_veiculo: Object.values(porVeiculo),
     trocas: items
   };
@@ -595,8 +700,8 @@ const server = http.createServer(async (req, res) => {
 
       if (resource === 'status') {
         const vehicles = await listVehicles();
-        const oilChanges = await listOilChanges();
-        return json(res, 200, { online: true, version: VERSION, db: sql ? 'neon' : 'file', counts: { vehicles: vehicles.length, oil_changes: oilChanges.length } });
+        const manutencoes = await listManutencoes();
+        return json(res, 200, { online: true, version: VERSION, db: sql ? 'neon' : 'file', counts: { vehicles: vehicles.length, manutencoes: manutencoes.length, trocas_oleo: manutencoes.filter((m) => m.tipo === 'TROCA DE ÓLEO').length } });
       }
       if (resource === 'data' && req.method === 'GET') {
         return json(res, 200, { vehicles: await listVehicles(), users: (await listUsers()).map(stripSenha) });
@@ -635,6 +740,24 @@ const server = http.createServer(async (req, res) => {
 
       if (resource === 'relatorio-mensal' && req.method === 'GET') {
         return json(res, 200, await monthlyOilReport(query));
+      }
+
+      if (resource === 'manutencoes' || resource === 'manutencao') {
+        if (req.method === 'GET' && !id) return json(res, 200, await listManutencoes(query));
+        if (req.method === 'GET' && id) {
+          const all = await listManutencoes();
+          const item = all.find((m) => Number(m.id) === id);
+          return item ? json(res, 200, item) : json(res, 404, { error: 'Not found' });
+        }
+        if (req.method === 'POST') return json(res, 201, await insertManutencao(await parseBody(req)));
+        if ((req.method === 'PATCH' || req.method === 'PUT') && id) {
+          const upd = await updateManutencao(id, await parseBody(req));
+          return upd ? json(res, 200, upd) : json(res, 404, { error: 'Not found' });
+        }
+        if (req.method === 'DELETE' && id) {
+          return (await deleteManutencao(id)) ? json(res, 200, { success: true }) : json(res, 404, { error: 'Not found' });
+        }
+        return json(res, 405, { error: 'Method not allowed' });
       }
 
       if (resource === 'vehicles') {

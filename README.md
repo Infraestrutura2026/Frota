@@ -30,10 +30,11 @@ Frota/
 | `DATABASE_URL` definida (Vercel) | **Neon (Postgres)** — compartilhado entre todos os computadores |
 | Sem `DATABASE_URL` (local dev) | `data/db.json` |
 
-As tabelas (`vehicles`, `users` e `oil_changes`) são **criadas automaticamente** na primeira
-chamada à API, já com os 29 veículos e o usuário admin. A tabela de trocas de óleo
-inclui o campo `horimetro`; em bancos Neon existentes ele também é adicionado
-automaticamente, sem migração manual.
+As tabelas (`vehicles`, `users` e `manutencoes`) são **criadas automaticamente** na primeira
+chamada à API, já com os 29 veículos e o usuário admin. A tabela `manutencoes` concentra
+as **ordens de serviço de manutenção** e trata a **troca de óleo** como um tipo
+(`TROCA DE ÓLEO`). Trocas de óleo antigas (tabela `oil_changes`) são migradas
+automaticamente para `manutencoes` na primeira execução, sem ação manual.
 
 ## 🚀 Executar localmente
 
@@ -67,7 +68,10 @@ Acesse `http://localhost:8080` — login: **admin / admin2025**
 | PATCH/PUT    | `/api/vehicles/:id` | Atualiza um veículo            |
 | DELETE       | `/api/vehicles/:id` | Exclui um veículo              |
 | idem         | `/api/users`        | Mesmas operações p/ usuários   |
-| GET          | `/api/trocas-oleo`  | Lista trocas de óleo           |
+| GET          | `/api/manutencoes`  | Lista manutenções (filtros: `tipo`, `status_os`, `mes`, `ano`, `q`, `placa`, `vehicle_id`) |
+| POST         | `/api/manutencoes`  | Registra uma manutenção / ordem de serviço |
+| PATCH/DELETE | `/api/manutencoes/:id` | Edita/exclui um registro    |
+| GET          | `/api/trocas-oleo`  | Lista trocas de óleo (= manutenções do tipo `TROCA DE ÓLEO`) |
 | POST         | `/api/trocas-oleo`  | Registra uma troca de óleo     |
 | PATCH/DELETE | `/api/trocas-oleo/:id` | Edita/exclui um registro    |
 | GET          | `/api/trocas-oleo/relatorio-mensal` | Relatório mensal |
