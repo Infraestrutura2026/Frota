@@ -580,6 +580,13 @@ a:focus-visible {
 .history-vehicle span { color: var(--text-muted); font-size: .76rem; }
 .history-chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .history-empty { padding: 28px; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-muted); font-size: .84rem; font-style: italic; text-align: center; }
+.history-empty-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 14px; font-style: normal; }
+.history-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.history-filters,
+.history-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.history-vehicle .badge { align-self: flex-start; }
+.history-syncing { color: var(--text-muted); font-size: .72rem; font-style: italic; }
+.history-head .history-vehicle > div { flex: 1; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
 .form-field { display: flex; flex-direction: column; gap: 6px; }
 .form-field span { color: var(--text-muted); font-size: .7rem; }

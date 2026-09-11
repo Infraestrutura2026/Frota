@@ -6,6 +6,8 @@ const App = (function() {
   let editingVehicle = null;
   let editingMaintenance = null;
   let historyVehicle = null;
+  let historyFilter = 'TODOS'; // TODOS | MANUT | OLEO
+  let historySyncing = false;
   let online = false;
 
   // Seed offline (usado só se a API estiver indisponível e não houver cache)
@@ -162,7 +164,7 @@ const App = (function() {
         }
       }
     }finally{ flushingMaint=false; }
-    if(synced){ saveMaintCache(); renderMaintenance(); renderOilChanges(); }
+    if(synced){ saveMaintCache(); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen(); }
   }
 
   // ---------- Fila: flush dos veículos pendentes ----------
@@ -309,6 +311,11 @@ const App = (function() {
     const mt=document.getElementById('maint-tipo-filter'); if(mt)mt.addEventListener('change',renderMaintenance);
     const mst=document.getElementById('maint-status-filter'); if(mst)mst.addEventListener('change',renderMaintenance);
     const mto=document.getElementById('m-tipo'); if(mto)mto.addEventListener('change',toggleOilFields);
+    // Esc fecha o modal aberto (histórico, manutenção ou veículo)
+    document.addEventListener('keydown',e=>{
+      if(e.key!=='Escape')return;
+      const open=document.querySelector('.modal.active'); if(open)open.classList.remove('active');
+    });
   }
 
   async function login(){
@@ -394,6 +401,15 @@ const App = (function() {
     return'default';
   }
 
+  // Placa clicável nas tabelas (Manutenção / Troca de Óleo): abre o histórico do veículo,
+  // igual ao clique na placa dos cartões do Painel Geral.
+  function placaLink(m, plate){
+    const text=esc(formatPlacaMercosul(plate||''))||'-';
+    const vid=Number(m?.vehicle_id)||Number(vehicles.find(x=>(x.placa||'').toUpperCase()===String(m?.placa||'').toUpperCase())?.id)||0;
+    if(!vid) return `<span class="placa-badge">${text}</span>`;
+    return `<span class="placa-badge placa-badge-clickable" role="button" tabindex="0" title="Ver histórico de manutenção e troca de óleo" onclick="App.openVehicleHistory(event, ${vid})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${vid});}">${text}</span>`;
+  }
+
   function renderDashboard(){
     renderDashGroups();
     const total=vehicles.length, act=vehicles.filter(v=>(v.status||'').toUpperCase()==='ATIVO').length, man=vehicles.filter(v=>(v.status||'').toUpperCase()==='MANUTENÇÃO').length;
@@ -411,18 +427,82 @@ const App = (function() {
     document.getElementById('dashboard-groups-count').textContent=`${vehicles.length} veículos · ${ks.length} grupos`;
     g.innerHTML=ks.map(gr=>{
       const i=info(gr); const gv=vehicles.filter(v=>norm(v.grupo)===gr);
-      const items=gv.map(v=>`<button type="button" class="dashboard-vehicle-item" onclick="App.editVehicle(${v.id})"><span class="dashboard-vehicle-topline"><span class="placa-badge placa-badge-clickable" title="Ver histórico de manutenção e troca de óleo" onclick="App.openVehicleHistory(event, ${Number(v.id)})">${esc(formatPlacaMercosul(v.placa))}</span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span></button>`).join('');
+      const items=gv.map(v=>`<button type="button" class="dashboard-vehicle-item" onclick="App.editVehicle(${v.id})"><span class="dashboard-vehicle-topline"><span class="placa-badge placa-badge-clickable" role="button" tabindex="0" title="Ver histórico de manutenção e troca de óleo deste veículo" aria-label="Ver histórico de manutenção de ${esc(formatPlacaMercosul(v.placa))}" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();App.openVehicleHistory(event, ${Number(v.id)});}">${esc(formatPlacaMercosul(v.placa))} 🔧</span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span></button>`).join('');
       return `<section class="fleet-group-module dashboard-group-module ${i.cls}"><div class="fleet-group-header"><div class="fleet-group-heading"><span class="fleet-group-icon">${i.icon}</span><div><h4>${i.label}</h4><span>Visão rápida</span></div></div><span class="fleet-group-count">${gv.length} veículo(s)</span></div><div class="dashboard-vehicle-list">${items}</div></section>`;
     }).join('');
   }
 
   // ============ HISTÓRICO DO VEÍCULO (ao clicar na placa do Painel Geral) ============
 
-  function openVehicleHistory(ev,id){
+  async function openVehicleHistory(ev,id){
     if(ev){ ev.stopPropagation(); ev.preventDefault(); } // não abre o editar do cartão
-    historyVehicle=id;
+    historyVehicle=Number(id);
+    historyFilter='TODOS';
     renderVehicleHistory();
     const m=document.getElementById('vehicle-history-modal'); if(m)m.classList.add('active');
+    await syncVehicleHistory(); // busca na API as OS mais recentes (outro computador pode ter lançado)
+  }
+
+  // Recarrega da API somente as manutenções do veículo em foco,
+  // preservando os registros criados offline que ainda não foram sincronizados.
+  async function syncVehicleHistory(){
+    const id=historyVehicle; if(!id)return;
+    historySyncing=true; renderVehicleHistory();
+    try{
+      const rows=await api('/manutencoes?vehicle_id='+encodeURIComponent(id));
+      if(Number(historyVehicle)!==Number(id))return; // o usuário abriu outro veículo
+      const pendentes=maintenances.filter(m=>Number(m.vehicle_id)===Number(id)&&isPendingRecord(m));
+      maintenances=maintenances.filter(m=>Number(m.vehicle_id)!==Number(id)).concat(rows,pendentes);
+      saveMaintCache();
+    }catch(e){ /* sem API: mantém o cache local já exibido */ }
+    finally{
+      if(Number(historyVehicle)===Number(id)){ historySyncing=false; renderVehicleHistory(); }
+    }
+  }
+
+  function setHistoryFilter(f){ historyFilter=f||'TODOS'; renderVehicleHistory(); }
+
+  function refreshHistoryIfOpen(){
+    const m=document.getElementById('vehicle-history-modal');
+    if(m&&m.classList.contains('active')) renderVehicleHistory();
+  }
+
+  // Todos os registros do veículo (usado nos chips) e os do filtro atual (usado na tabela)
+  function historyAllItems(){
+    const v=vehicles.find(x=>Number(x.id)===Number(historyVehicle));
+    if(!v)return [];
+    return maintenances.filter(m=>Number(m.vehicle_id)===Number(v.id));
+  }
+  function historyItems(){
+    return historyAllItems()
+      .filter(m=>{
+        const isOil=(m.tipo||'').toUpperCase()==='TROCA DE ÓLEO';
+        return historyFilter==='TODOS'||(historyFilter==='OLEO'?isOil:!isOil);
+      })
+      .slice()
+      .sort((a,b)=>String(b.data||'').slice(0,10).localeCompare(String(a.data||'').slice(0,10))||Number(b.id||0)-Number(a.id||0));
+  }
+
+  function exportHistoryCsv(){
+    const v=vehicles.find(x=>Number(x.id)===Number(historyVehicle)); if(!v)return;
+    const items=historyItems(); if(!items.length){ toast('Nenhum registro para exportar.','aviso'); return; }
+    const placa=formatPlacaMercosul(v.placa);
+    const num=n=>n==null?'':String(n).replace('.',',');
+    const head=['Data','Tipo','Serviço','Itens / peças','Oficina','Hodômetro (km)','Próx. manutenção (km)','Status da OS','Custo (R$)','Saída','Óleo','Litros','Observações'];
+    const lines=[head.join(';')].concat(items.map(m=>[
+      dateLabel(m.data),m.tipo||'',m.servico||'',m.itens||'',m.oficina||'',
+      num(m.hodometro),num(m.proxima_manutencao),m.status_os||'',
+      num(m.custo==null?'':Number(m.custo).toFixed(2)),
+      m.data_saida?dateLabel(m.data_saida):'',m.tipo_oleo||'',num(m.quantidade),m.observacoes||''
+    ].map(cell=>`"${String(cell==null?'':cell).replace(/"/g,'""')}"`).join(';')));
+    try{
+      const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+      const url=URL.createObjectURL(blob), a=document.createElement('a');
+      a.href=url; a.download=`Historico-${placa||'veiculo'}-${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+      toast('Histórico exportado em CSV!');
+    }catch(e){ toast('Não foi possível exportar: '+e.message,'aviso'); }
   }
 
   function renderVehicleHistory(){
@@ -432,27 +512,55 @@ const App = (function() {
     const v=vehicles.find(x=>Number(x.id)===Number(historyVehicle));
     const placa=formatPlacaMercosul(v?.placa||'');
     titleEl.textContent='Histórico — '+(placa||'Veículo');
-    const items=maintenances
-      .filter(m=>v&&Number(m.vehicle_id)===Number(v.id))
-      .slice()
-      .sort((a,b)=>String(b.data||'').slice(0,10).localeCompare(String(a.data||'').slice(0,10)));
-    const oil=items.filter(m=>(m.tipo||'').toUpperCase()==='TROCA DE ÓLEO').length;
+    const todos=historyAllItems();
+    const items=historyItems();
     const money=n=>'R$ '+Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
     const model=v?`${v.marca||''} ${v.modelo||''}`.trim():'';
-    const meta=[v?.grupo,v?.ano,`${Number(v?.hodometro||0).toLocaleString('pt-BR')} km`].filter(Boolean).join(' · ');
+    const meta=[v?.grupo&&`Grupo ${v.grupo}`,v?.ano,`${Number(v?.hodometro||0).toLocaleString('pt-BR')} km`,v?.combustivel].filter(Boolean).join(' · ');
+    const sorted=todos.slice().sort((a,b)=>String(b.data||'').slice(0,10).localeCompare(String(a.data||'').slice(0,10)));
+    const oil=todos.filter(m=>(m.tipo||'').toUpperCase()==='TROCA DE ÓLEO').length;
+    const ultima=sorted[0];
+    const proximaKm=sorted.map(m=>Number(m.proxima_manutencao)).filter(n=>n>0).sort((a,b)=>b-a)[0]||null;
     const chips=[
-      `<span class="report-chip"><b>${items.length}</b> ${items.length===1?'manutenção':'manutenções'}</span>`,
+      `<span class="report-chip"><b>${todos.length}</b> ${todos.length===1?'manutenção':'manutenções'}</span>`,
       `<span class="report-chip"><b>${oil}</b> ${oil===1?'troca de óleo':'trocas de óleo'}</span>`,
-      `<span class="report-chip"><b>${money(items.reduce((s,m)=>s+Number(m.custo||0),0))}</b> custo acumulado</span>`
+      `<span class="report-chip"><b>${money(todos.reduce((s,m)=>s+Number(m.custo||0),0))}</b> custo acumulado</span>`,
+      `<span class="report-chip"><b>${ultima?dateLabel(ultima.data):'—'}</b> última manutenção</span>`,
+      proximaKm?`<span class="report-chip"><b>${proximaKm.toLocaleString('pt-BR')} km</b> próxima programada</span>`:''
     ].join('');
+    const vid=Number(historyVehicle);
+    const filters=[['TODOS','Todos'],['MANUT','Manutenções'],['OLEO','Trocas de óleo']]
+      .map(([k,l])=>`<button type="button" class="btn btn-sm ${historyFilter===k?'btn-primary':''}" onclick="App.setHistoryFilter('${k}')">${l}</button>`).join('');
+    const actions=`
+      <button type="button" class="btn btn-sm btn-primary" onclick="App.openMaintenanceModal(null, ${vid})">＋ Nova manutenção</button>
+      <button type="button" class="btn btn-sm" onclick="App.openMaintenanceModal('TROCA DE ÓLEO', ${vid})">◉ Troca de óleo</button>
+      <button type="button" class="btn btn-sm" onclick="App.exportHistoryCsv()">⬇ Exportar CSV</button>
+      <button type="button" class="btn btn-sm" title="Recarregar do servidor" onclick="App.syncVehicleHistory()">⟳ Atualizar</button>`;
     const rows=items.map(m=>{
       const km=m.hodometro==null?'-':`${Number(m.hodometro).toLocaleString('pt-BR')} km`;
-      return `<tr><td>${dateLabel(m.data)}</td><td><span class="badge ${tipoBadge(m.tipo)}">${esc(m.tipo||'-')}</span></td><td>${esc(m.servico||'-')}</td><td>${esc(m.oficina||'-')}</td><td>${km}</td><td><span class="badge ${osBadge(m.status_os)}">${esc(m.status_os||'-')}</span></td><td>${m.custo==null?'-':money(m.custo)}</td></tr>`;
+      const prox=m.proxima_manutencao?`<small class="table-subtitle">próx. ${Number(m.proxima_manutencao).toLocaleString('pt-BR')} km</small>`:'';
+      const saida=m.data_saida?`<small class="table-subtitle">saída ${dateLabel(m.data_saida)}</small>`:'';
+      const extra=[m.tipo_oleo?`óleo ${m.tipo_oleo}${m.quantidade?` (${Number(m.quantidade).toLocaleString('pt-BR',{maximumFractionDigits:2})} L)`:''}`:'',m.itens?`peças: ${m.itens}`:'',m.observacoes?`obs: ${m.observacoes}`:''].filter(Boolean).join(' · ');
+      return `<tr><td>${dateLabel(m.data)}${saida}</td><td><span class="badge ${tipoBadge(m.tipo)}">${esc(m.tipo||'-')}</span></td><td>${esc(m.servico||'-')}${extra?`<small class="table-subtitle">${esc(extra)}</small>`:''}</td><td>${esc(m.oficina||'-')}</td><td>${km}${prox}</td><td><span class="badge ${osBadge(m.status_os)}">${esc(m.status_os||'-')}</span></td><td>${m.custo==null?'-':money(m.custo)}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(m.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(m.id)})">🗑️</button></td></tr>`;
     }).join('');
-    content.innerHTML=`<div class="history-head"><div class="history-vehicle"><span class="placa-badge">${esc(placa||'-')}</span><div><strong>${esc(model||'Veículo')}</strong><span>${esc(meta)}</span></div></div><div class="history-chips">${chips}</div></div>`
-      +(items.length
-        ?`<div class="table-responsive"><table class="data-table"><thead><tr><th>Data</th><th>Tipo</th><th>Serviço</th><th>Oficina</th><th>Hodômetro</th><th>Status OS</th><th>Custo</th></tr></thead><tbody>${rows}</tbody></table></div>`
-        :'<div class="history-empty">Nenhuma manutenção ou troca de óleo registrada para este veículo.</div>');
+    const empty = todos.length===0
+      ? `<div class="history-empty">Nenhuma manutenção ou troca de óleo registrada para este veículo.<div class="history-empty-actions"><button type="button" class="btn btn-sm btn-primary" onclick="App.openMaintenanceModal(null, ${vid})">＋ Registrar manutenção</button><button type="button" class="btn btn-sm" onclick="App.openMaintenanceModal('TROCA DE ÓLEO', ${vid})">◉ Registrar troca de óleo</button></div></div>`
+      : '<div class="history-empty">Nenhum registro neste filtro.</div>';
+    content.innerHTML=`
+      <div class="history-head">
+        <div class="history-vehicle">
+          <span class="placa-badge">${esc(placa||'-')}</span>
+          <div><strong>${esc(model||'Veículo')}</strong><span>${esc(meta)}</span></div>
+          ${v?`<span class="badge ${badge(v.status)}">${esc(v.status||'ATIVO')}</span>`:''}
+          ${historySyncing?'<span class="history-syncing">Atualizando…</span>':''}
+        </div>
+        <div class="history-chips">${chips}</div>
+      </div>
+      <div class="history-toolbar">
+        <div class="history-filters">${filters}</div>
+        <div class="history-actions">${actions}</div>
+      </div>
+      ${items.length?`<div class="table-responsive"><table class="data-table"><thead><tr><th>Data</th><th>Tipo</th><th>Serviço</th><th>Oficina</th><th>Hodômetro</th><th>Status OS</th><th>Custo</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`:empty}`;
   }
 
   function renderVehicles(){
@@ -462,7 +570,7 @@ const App = (function() {
     document.getElementById('vehicle-count').textContent=`${filt.length} de ${vehicles.length}`;
     document.getElementById('vehicles-groups').innerHTML=keys().map(gr=>{
       const i=info(gr); const gv=filt.filter(v=>norm(v.grupo)===gr);
-      const rows=gv.map(v=>`<tr><td><span class="placa-badge">${v.placa}</span></td><td><b>${v.marca||''}</b> ${v.modelo||''}</td><td>${v.ano||'-'}</td><td><b>${(v.hodometro||0).toLocaleString('pt-BR')} km</b></td><td><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></td><td>${v.combustivel||'-'}</td><td><button class="btn btn-sm btn-primary" onclick="App.editVehicle(${v.id})">✏️</button><button class="btn btn-sm btn-danger" onclick="App.deleteVehicle(${v.id})">🗑️</button></td></tr>`).join('');
+      const rows=gv.map(v=>`<tr><td><span class="placa-badge placa-badge-clickable" role="button" tabindex="0" title="Ver histórico de manutenção e troca de óleo" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}">${esc(formatPlacaMercosul(v.placa))}</span></td><td><b>${v.marca||''}</b> ${v.modelo||''}</td><td>${v.ano||'-'}</td><td><b>${(v.hodometro||0).toLocaleString('pt-BR')} km</b></td><td><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></td><td>${v.combustivel||'-'}</td><td><button class="btn btn-sm btn-primary" onclick="App.editVehicle(${v.id})">✏️</button><button class="btn btn-sm btn-danger" onclick="App.deleteVehicle(${v.id})">🗑️</button></td></tr>`).join('');
       return `<section class="fleet-group-module ${i.cls}"><div class="fleet-group-header"><div class="fleet-group-heading"><span class="fleet-group-icon">${i.icon}</span><div><h4>${i.label}</h4><span>Veículos do grupo</span></div></div><span class="fleet-group-count">${gv.length}</span></div><div class="fleet-group-content table-responsive"><table class="data-table"><thead><tr><th>Placa</th><th>Marca/Modelo</th><th>Ano</th><th>KM</th><th>Status</th><th>Combustível</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty-state">Nenhum veículo</td></tr>'}</tbody></table></div></section>`;
     }).join('');
   }
@@ -492,7 +600,7 @@ const App = (function() {
       const km=m.hodometro==null?'-':`${Number(m.hodometro).toLocaleString('pt-BR')} km`;
       const prox=m.proxima_manutencao==null?'':'<small class="table-subtitle">próx. '+Number(m.proxima_manutencao).toLocaleString('pt-BR')+' km</small>';
       const costTxt=m.custo==null?'-':'R$ '+Number(m.custo).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-      return `<tr><td>${dateLabel(m.data)}</td><td><span class="placa-badge">${esc(plate)}</span><small class="table-subtitle">${esc(model)}</small></td><td><span class="badge ${tipoBadge(m.tipo)}">${esc(m.tipo||'-')}</span></td><td>${esc(m.servico||'-')}</td><td>${km}${prox}</td><td><span class="badge ${osBadge(m.status_os)}">${esc(m.status_os||'-')}</span></td><td>${costTxt}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(m.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(m.id)})">🗑️</button></td></tr>`;
+      return `<tr><td>${dateLabel(m.data)}</td><td>${placaLink(m,plate)}<small class="table-subtitle">${esc(model)}</small></td><td><span class="badge ${tipoBadge(m.tipo)}">${esc(m.tipo||'-')}</span></td><td>${esc(m.servico||'-')}</td><td>${km}${prox}</td><td><span class="badge ${osBadge(m.status_os)}">${esc(m.status_os||'-')}</span></td><td>${costTxt}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(m.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(m.id)})">🗑️</button></td></tr>`;
     }).join('');
     list.innerHTML=`<table class="data-table"><thead><tr><th>Data</th><th>Veículo</th><th>Tipo</th><th>Serviço</th><th>Hodômetro</th><th>Status</th><th>Custo</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty-state">Nenhuma manutenção encontrada para os filtros selecionados.</td></tr>'}</tbody></table>`;
   }
@@ -506,13 +614,16 @@ const App = (function() {
     return ['<option value="">Selecione o veículo</option>',...vehicles.map(v=>`<option value="${Number(v.id)}" ${Number(v.id)===Number(selected)?'selected':''}>${esc(v.placa)} — ${esc(`${v.marca||''} ${v.modelo||''}`.trim())}</option>`)].join('');
   }
 
-  function openMaintenanceModal(preset){
+  // preset: tipo de manutenção (ou 'TROCA DE ÓLEO'); vehicleId: veículo já selecionado
+  // (usado quando o modal é aberto a partir do histórico de um veículo)
+  function openMaintenanceModal(preset,vehicleId){
     editingMaintenance=null;
     const title=document.getElementById('maintenance-modal-title');
     title.textContent=preset==='TROCA DE ÓLEO'?'Registrar Troca de Óleo':'Nova Manutenção';
     const form=document.getElementById('maintenance-form'); if(form)form.reset();
     const data=document.getElementById('m-data'); if(data)data.value=new Date().toISOString().slice(0,10);
-    const select=document.getElementById('m-vehicle'); if(select)select.innerHTML=vehicleOptions('');
+    const select=document.getElementById('m-vehicle');
+    if(select){ select.innerHTML=vehicleOptions(vehicleId||''); select.value=vehicleId||''; }
     const tipo=document.getElementById('m-tipo');
     if(tipo){ tipo.disabled=false; tipo.value=preset||'PREVENTIVA'; if(preset==='TROCA DE ÓLEO')tipo.disabled=true; }
     toggleOilFields();
@@ -562,7 +673,7 @@ const App = (function() {
       const saved=await api(editingMaintenance?`/manutencoes/${editingMaintenance}`:'/manutencoes',{method:editingMaintenance?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
       if(editingMaintenance){const i=maintenances.findIndex(x=>Number(x.id)===editingMaintenance);if(i>=0)maintenances[i]=saved;}
       else maintenances.unshift(saved);
-      saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges();
+      saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
       if(loadQueue().length) flushMaintenanceQueue(); // aproveita para drenar a fila
       toast(data.tipo==='TROCA DE ÓLEO'?'Troca de óleo salva!':'Manutenção salva!'); return;
     }catch(e){
@@ -589,7 +700,7 @@ const App = (function() {
       :q.findIndex(x=>x.op==='create'&&Number(x.localId)===Number(local.id));
     if(qi>=0)q[qi]=entry; else q.push(entry);
     saveQueue(q);
-    saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges();
+    saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
     toast('Sem conexão com a API — registro salvo neste dispositivo e será sincronizado automaticamente.','aviso');
   }
 
@@ -601,7 +712,7 @@ const App = (function() {
     try{
       await api('/manutencoes/'+id,{method:'DELETE'});
       maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));
-      saveMaintCache(); renderMaintenance(); renderOilChanges();
+      saveMaintCache(); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
       if(loadQueue().length) flushMaintenanceQueue(); // aproveita para drenar a fila
       toast('Registro excluído!'); return;
     }catch(e){
@@ -619,7 +730,7 @@ const App = (function() {
       toast('Registro excluído localmente — a exclusão será sincronizada quando a API voltar.','aviso');
     }
     maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));
-    saveMaintCache(); renderMaintenance(); renderOilChanges();
+    saveMaintCache(); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
   }
 
   // ============ TROCA DE ÓLEO (visão ligada à Manutenção) ============
@@ -643,7 +754,7 @@ const App = (function() {
       const plate=item.placa||v?.placa||'-';
       const model=v?`${v.marca||''} ${v.modelo||''}`.trim():'Veículo cadastrado';
       const quantity=item.quantidade==null?'-':`${Number(item.quantidade).toLocaleString('pt-BR',{maximumFractionDigits:2})} L`;
-      return `<tr><td>${dateLabel(item.data)}</td><td><span class="placa-badge">${esc(plate)}</span><small class="table-subtitle">${esc(model)}</small></td><td>${esc(item.tipo_oleo||'-')}</td><td>${item.hodometro==null?'-':`${Number(item.hodometro).toLocaleString('pt-BR')} km`}</td><td>${quantity}</td><td>${esc(item.observacoes||'-')}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(item.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(item.id)})">🗑️</button></td></tr>`;
+      return `<tr><td>${dateLabel(item.data)}</td><td>${placaLink(item,plate)}<small class="table-subtitle">${esc(model)}</small></td><td>${esc(item.tipo_oleo||'-')}</td><td>${item.hodometro==null?'-':`${Number(item.hodometro).toLocaleString('pt-BR')} km`}</td><td>${quantity}</td><td>${esc(item.observacoes||'-')}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(item.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(item.id)})">🗑️</button></td></tr>`;
     }).join('');
     list.innerHTML=`<table class="data-table"><thead><tr><th>Data</th><th>Veículo</th><th>Óleo</th><th>Hodômetro</th><th>Quantidade</th><th>Observações</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty-state">Nenhuma troca de óleo encontrada para os filtros selecionados.</td></tr>'}</tbody></table>`;
   }
@@ -748,5 +859,5 @@ const App = (function() {
 
   function closeModal(id){const el=document.getElementById(id);if(el)el.classList.remove('active');}
 
-  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,openVehicleHistory,renderVehicleHistory,formatPlacaMercosul,closeModal,switchPage:page};
+  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,openVehicleHistory,renderVehicleHistory,syncVehicleHistory,setHistoryFilter,exportHistoryCsv,formatPlacaMercosul,closeModal,switchPage:page};
 })();

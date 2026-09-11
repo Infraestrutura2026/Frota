@@ -36,6 +36,25 @@ as **ordens de serviço de manutenção** e trata a **troca de óleo** como um t
 (`TROCA DE ÓLEO`). Trocas de óleo antigas (tabela `oil_changes`) são migradas
 automaticamente para `manutencoes` na primeira execução, sem ação manual.
 
+## 🧾 Histórico de manutenção por veículo
+
+Ao clicar na **placa** de um veículo (nos cartões do **Painel Geral** ou nas tabelas de
+**Veículos**, **Manutenção** e **Troca de Óleo**) abre-se o **histórico daquele veículo**:
+
+- dados do veículo (grupo, ano, hodômetro atual, combustível e status);
+- resumo em chips: total de manutenções, trocas de óleo, custo acumulado, data da última
+  manutenção e próxima manutenção programada (km);
+- filtros rápidos: **Todos**, **Manutenções** e **Trocas de óleo**;
+- cada registro mostra tipo, serviço, peças/óleo, oficina, hodômetro, status da OS, custo e
+  datas de entrada/saída, com botões para **editar** e **excluir**;
+- ações: **Nova manutenção** e **Troca de óleo** (já com o veículo selecionado),
+  **Exportar CSV** do histórico e **Atualizar** (recarrega do servidor);
+- ao abrir, o histórico busca as ordens de serviço direto na API, garantindo os dados mais
+  recentes mesmo que outro computador tenha lançado a manutenção.
+
+O restante do cartão continua abrindo a **edição do veículo**; a placa é que abre o histórico.
+`Esc` fecha o modal.
+
 ## 🚀 Executar localmente
 
 ```bash
