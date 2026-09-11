@@ -5,6 +5,7 @@ const App = (function() {
   let maintenances = [];
   let editingVehicle = null;
   let editingMaintenance = null;
+  let historyVehicle = null;
   let online = false;
 
   // Seed offline (usado só se a API estiver indisponível e não houver cache)
@@ -48,6 +49,15 @@ const App = (function() {
   function info(g){ const k=norm(g); return GROUPS[k]||{label:`Grupo ${k}`,icon:'🚗',cls:'group-other'}; }
   function esc(value){ const d=document.createElement('div'); d.textContent=value==null?'':String(value); return d.innerHTML; }
   function dateLabel(value){ if(!value)return'-'; const parts=String(value).slice(0,10).split('-'); return parts.length===3?`${parts[2]}/${parts[1]}/${parts[0]}`:String(value); }
+
+  // Placa no padrão Mercosul (AAA9A99). Placas antigas (AAA9999) são convertidas
+  // pela regra oficial: o 2º dígito vira letra (0→A, 1→B … 9→J). Ex.: ABC1234 → ABC1C34.
+  function formatPlacaMercosul(p){
+    const s=String(p==null?'':p).toUpperCase().replace(/[^A-Z0-9]/g,'');
+    if(/^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(s))return s; // já é Mercosul
+    if(/^[A-Z]{3}[0-9]{4}$/.test(s))return s.slice(0,4)+'ABCDEFGHIJ'[Number(s.charAt(4))]+s.slice(5);
+    return s;
+  }
   function currentOilMonth(){ return document.getElementById('oil-month-filter')?.value || new Date().toISOString().slice(0,7); }
   function oilRecords(){ return maintenances.filter(m => (m.tipo||'').toUpperCase()==='TROCA DE ÓLEO'); }
 
@@ -401,9 +411,48 @@ const App = (function() {
     document.getElementById('dashboard-groups-count').textContent=`${vehicles.length} veículos · ${ks.length} grupos`;
     g.innerHTML=ks.map(gr=>{
       const i=info(gr); const gv=vehicles.filter(v=>norm(v.grupo)===gr);
-      const items=gv.map(v=>`<button type="button" class="dashboard-vehicle-item" onclick="App.editVehicle(${v.id})"><span class="dashboard-vehicle-topline"><span class="placa-badge">${v.placa}</span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span></button>`).join('');
+      const items=gv.map(v=>`<button type="button" class="dashboard-vehicle-item" onclick="App.editVehicle(${v.id})"><span class="dashboard-vehicle-topline"><span class="placa-badge placa-badge-clickable" title="Ver histórico de manutenção e troca de óleo" onclick="App.openVehicleHistory(event, ${Number(v.id)})">${esc(formatPlacaMercosul(v.placa))}</span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span></button>`).join('');
       return `<section class="fleet-group-module dashboard-group-module ${i.cls}"><div class="fleet-group-header"><div class="fleet-group-heading"><span class="fleet-group-icon">${i.icon}</span><div><h4>${i.label}</h4><span>Visão rápida</span></div></div><span class="fleet-group-count">${gv.length} veículo(s)</span></div><div class="dashboard-vehicle-list">${items}</div></section>`;
     }).join('');
+  }
+
+  // ============ HISTÓRICO DO VEÍCULO (ao clicar na placa do Painel Geral) ============
+
+  function openVehicleHistory(ev,id){
+    if(ev){ ev.stopPropagation(); ev.preventDefault(); } // não abre o editar do cartão
+    historyVehicle=id;
+    renderVehicleHistory();
+    const m=document.getElementById('vehicle-history-modal'); if(m)m.classList.add('active');
+  }
+
+  function renderVehicleHistory(){
+    const titleEl=document.getElementById('vehicle-history-title');
+    const content=document.getElementById('vehicle-history-content');
+    if(!titleEl||!content)return;
+    const v=vehicles.find(x=>Number(x.id)===Number(historyVehicle));
+    const placa=formatPlacaMercosul(v?.placa||'');
+    titleEl.textContent='Histórico — '+(placa||'Veículo');
+    const items=maintenances
+      .filter(m=>v&&Number(m.vehicle_id)===Number(v.id))
+      .slice()
+      .sort((a,b)=>String(b.data||'').slice(0,10).localeCompare(String(a.data||'').slice(0,10)));
+    const oil=items.filter(m=>(m.tipo||'').toUpperCase()==='TROCA DE ÓLEO').length;
+    const money=n=>'R$ '+Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const model=v?`${v.marca||''} ${v.modelo||''}`.trim():'';
+    const meta=[v?.grupo,v?.ano,`${Number(v?.hodometro||0).toLocaleString('pt-BR')} km`].filter(Boolean).join(' · ');
+    const chips=[
+      `<span class="report-chip"><b>${items.length}</b> ${items.length===1?'manutenção':'manutenções'}</span>`,
+      `<span class="report-chip"><b>${oil}</b> ${oil===1?'troca de óleo':'trocas de óleo'}</span>`,
+      `<span class="report-chip"><b>${money(items.reduce((s,m)=>s+Number(m.custo||0),0))}</b> custo acumulado</span>`
+    ].join('');
+    const rows=items.map(m=>{
+      const km=m.hodometro==null?'-':`${Number(m.hodometro).toLocaleString('pt-BR')} km`;
+      return `<tr><td>${dateLabel(m.data)}</td><td><span class="badge ${tipoBadge(m.tipo)}">${esc(m.tipo||'-')}</span></td><td>${esc(m.servico||'-')}</td><td>${esc(m.oficina||'-')}</td><td>${km}</td><td><span class="badge ${osBadge(m.status_os)}">${esc(m.status_os||'-')}</span></td><td>${m.custo==null?'-':money(m.custo)}</td></tr>`;
+    }).join('');
+    content.innerHTML=`<div class="history-head"><div class="history-vehicle"><span class="placa-badge">${esc(placa||'-')}</span><div><strong>${esc(model||'Veículo')}</strong><span>${esc(meta)}</span></div></div><div class="history-chips">${chips}</div></div>`
+      +(items.length
+        ?`<div class="table-responsive"><table class="data-table"><thead><tr><th>Data</th><th>Tipo</th><th>Serviço</th><th>Oficina</th><th>Hodômetro</th><th>Status OS</th><th>Custo</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        :'<div class="history-empty">Nenhuma manutenção ou troca de óleo registrada para este veículo.</div>');
   }
 
   function renderVehicles(){
@@ -699,5 +748,5 @@ const App = (function() {
 
   function closeModal(id){const el=document.getElementById(id);if(el)el.classList.remove('active');}
 
-  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,closeModal,switchPage:page};
+  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,openVehicleHistory,renderVehicleHistory,formatPlacaMercosul,closeModal,switchPage:page};
 })();
