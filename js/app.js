@@ -65,34 +65,195 @@ const App = (function() {
     if(!Array.isArray(vehicles)||vehicles.length===0){vehicles=VEHICLES.map((v,i)=>({...v,id:i+1})); saveCache();}
   }
   function saveMaintCache(){ try{localStorage.setItem('frota_manutencoes',JSON.stringify(maintenances));}catch{} }
-  function loadMaintCache(){
-    try{maintenances=JSON.parse(localStorage.getItem('frota_manutencoes')||'[]');}catch{maintenances=[];}
-    if(!Array.isArray(maintenances))maintenances=[];
+  function readMaintCache(){
+    try{const arr=JSON.parse(localStorage.getItem('frota_manutencoes')||'[]');return Array.isArray(arr)?arr:[];}catch{return[];}
+  }
+  function loadMaintCache(){ maintenances=readMaintCache(); }
+
+  // ---------- Fila de sincronização offline (manutenções) ----------
+  const MAINT_QUEUE_KEY='frota_maintenance_queue';
+  function loadQueue(){
+    try{const arr=JSON.parse(localStorage.getItem(MAINT_QUEUE_KEY)||'[]');return Array.isArray(arr)?arr:[];}catch{return[];}
+  }
+  function saveQueue(q){ try{localStorage.setItem(MAINT_QUEUE_KEY,JSON.stringify(q||[]));}catch{} }
+
+  // ---------- Fila de sincronização offline (veículos) ----------
+  const VEHICLE_QUEUE_KEY='frota_vehicle_queue';
+  function loadVehicleQueue(){
+    try{const arr=JSON.parse(localStorage.getItem(VEHICLE_QUEUE_KEY)||'[]');return Array.isArray(arr)?arr:[];}catch{return[];}
+  }
+  function saveVehicleQueue(q){ try{localStorage.setItem(VEHICLE_QUEUE_KEY,JSON.stringify(q||[]));}catch{} }
+
+  // Registro criado/alterado enquanto offline: id de timestamp (>1e11) ou flag _pending
+  function isPendingRecord(m){ return !!m&&(m._pending===true||(m.id!=null&&Number(m.id)>1e11)); }
+
+  function readVehicleCache(){
+    try{const arr=JSON.parse(localStorage.getItem('frota_vehicles')||'[]');return Array.isArray(arr)?arr:[];}catch{return[];}
+  }
+
+  function maintenancePayload(m){
+    return {
+      vehicle_id:Number(m.vehicle_id),
+      data:m.data||null,
+      data_saida:m.data_saida||null,
+      hodometro:m.hodometro==null?null:Number(m.hodometro),
+      proxima_manutencao:m.proxima_manutencao==null?null:Number(m.proxima_manutencao),
+      tipo:(m.tipo||'PREVENTIVA').toUpperCase(),
+      status_os:(m.status_os||'CONCLUÍDA').toUpperCase(),
+      tipo_oleo:m.tipo_oleo||null,
+      quantidade:m.quantidade==null?null:Number(m.quantidade),
+      oficina:m.oficina||null,
+      custo:m.custo==null?null:Number(m.custo),
+      servico:m.servico||null,
+      itens:m.itens||null,
+      observacoes:m.observacoes||null,
+      placa:m.placa||null
+    };
+  }
+  function vehiclePayload(v){
+    return {
+      placa:v.placa,grupo:v.grupo,marca:v.marca,modelo:v.modelo,
+      ano:v.ano==null?null:Number(v.ano),cor:v.cor,
+      hodometro:Number(v.hodometro)||0,status:v.status,
+      combustivel:v.combustivel,capacidade:v.capacidade==null?null:Number(v.capacidade)
+    };
+  }
+
+  // ---------- Fila: flush das manutenções pendentes ----------
+  let flushingMaint=false, flushingVehicle=false;
+  async function flushMaintenanceQueue(){
+    if(flushingMaint)return;
+    flushingMaint=true;
+    let synced=false;
+    try{
+      while(loadQueue().length){
+        const q=loadQueue(), item=q[0];
+        try{
+          if(item.op==='delete'){
+            try{await api('/manutencoes/'+item.id,{method:'DELETE'});}
+            catch(e){ if(!isOfflineError(e)&&e.status!==404) throw e; } // 404: já não existe no servidor
+            maintenances=maintenances.filter(x=>Number(x.id)!==Number(item.id));
+          }else{
+            const saved=await api(item.op==='update'?'/manutencoes/'+item.id:'/manutencoes',
+              {method:item.op==='update'?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item.payload)});
+            if(item.op==='create'){
+              const i=maintenances.findIndex(x=>Number(x.id)===Number(item.localId));
+              if(i>=0)maintenances[i]=saved; else maintenances.unshift(saved);
+            }else{
+              const i=maintenances.findIndex(x=>Number(x.id)===Number(item.id));
+              if(i>=0)maintenances[i]={...maintenances[i],...saved,_pending:false};
+            }
+          }
+          const after=loadQueue(); after.shift(); saveQueue(after);
+          saveMaintCache(); synced=true;
+        }catch(e){
+          if(!isOfflineError(e)) toast('Não foi possível sincronizar um registro de manutenção: '+e.message,'aviso');
+          break; // falha: item volta/permanece na fila para tentar de novo
+        }
+      }
+    }finally{ flushingMaint=false; }
+    if(synced){ saveMaintCache(); renderMaintenance(); renderOilChanges(); }
+  }
+
+  // ---------- Fila: flush dos veículos pendentes ----------
+  async function flushVehicleQueue(){
+    if(flushingVehicle)return;
+    flushingVehicle=true;
+    let synced=false;
+    try{
+      while(loadVehicleQueue().length){
+        const q=loadVehicleQueue(), item=q[0];
+        try{
+          if(item.op==='delete'){
+            try{await api('/vehicles/'+item.id,{method:'DELETE'});}
+            catch(e){ if(!isOfflineError(e)&&e.status!==404) throw e; }
+            vehicles=vehicles.filter(x=>Number(x.id)!==Number(item.id));
+          }else{
+            const saved=await api(item.op==='update'?'/vehicles/'+item.id:'/vehicles',
+              {method:item.op==='update'?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item.payload)});
+            if(item.op==='create'){
+              const i=vehicles.findIndex(x=>Number(x.id)===Number(item.localId));
+              if(i>=0)vehicles[i]=saved; else vehicles.push(saved);
+            }else{
+              const i=vehicles.findIndex(x=>Number(x.id)===Number(item.id));
+              if(i>=0)vehicles[i]={...vehicles[i],...saved,_pending:false};
+            }
+          }
+          const after=loadVehicleQueue(); after.shift(); saveVehicleQueue(after);
+          saveCache(); synced=true;
+        }catch(e){
+          if(!isOfflineError(e)) toast('Não foi possível sincronizar um veículo: '+e.message,'aviso');
+          break; // falha: item volta/permanece na fila para tentar de novo
+        }
+      }
+    }finally{ flushingVehicle=false; }
+    if(synced){ saveCache(); renderVehicles(); renderDashboard(); }
   }
 
   // ---------- API ----------
   async function api(path, opts){
-    const r=await fetch('/api'+path, opts);
-    if(!r.ok){ let msg='Erro na API'; try{msg=(await r.json()).error||msg;}catch{} throw new Error(msg); }
+    let r;
+    try{
+      r=await fetch('/api'+path, opts);
+    }catch(err){
+      err.offline=true; // falha de rede/fetch: API fora do ar
+      throw err;
+    }
+    if(!r.ok){
+      let msg='Erro na API'; try{msg=(await r.json()).error||msg;}catch{}
+      const e=new Error(msg);
+      e.status=r.status;
+      if(r.status===502||r.status===503||r.status===504) e.offline=true; // gateway indisponível
+      throw e;
+    }
+    online=true; setConnStatus(true);
     return r.json();
   }
+  function isOfflineError(e){ return !!(e&&(e.offline===true||e.status===502||e.status===503||e.status===504)); }
 
   async function syncVehicles(){
+    let fromServer=null;
     try{
-      vehicles=await api('/vehicles');
+      fromServer=await api('/vehicles');
+      vehicles=fromServer;
       online=true; saveCache(); setConnStatus(true);
-    }catch{
+    }catch(e){
       online=false; setConnStatus(false); loadCache();
+      return;
     }
+    // Registros salvos offline (id de timestamp ou _pending) que ainda não estão no servidor:
+    // enfileira e sincroniza automaticamente.
+    const pending=readVehicleCache().filter(v=>isPendingRecord(v)
+      &&!fromServer.some(s=>Number(s.id)===Number(v.id))
+      &&!fromServer.some(s=>(s.placa||'').toUpperCase()===(v.placa||'').toUpperCase()));
+    if(pending.length){
+      const q=loadVehicleQueue();
+      pending.forEach(v=>{ if(!q.some(x=>x.op==='create'&&Number(x.localId)===Number(v.id))) q.push({op:'create',localId:v.id,payload:vehiclePayload(v)}); });
+      saveVehicleQueue(q);
+    }
+    if(loadVehicleQueue().length) await flushVehicleQueue();
   }
 
   async function syncMaintenances(){
+    let fromServer=null;
     try{
-      maintenances=await api('/manutencoes');
+      fromServer=await api('/manutencoes');
+      maintenances=fromServer;
       saveMaintCache();
-    }catch{
+    }catch(e){
+      if(isOfflineError(e)){ online=false; setConnStatus(false); }
       loadMaintCache();
+      return;
     }
+    // Detecta registros salvos offline (id de timestamp >1e11 ou flag _pending) que não
+    // estão no servidor: enfileira e chama flushMaintenanceQueue().
+    const pending=readMaintCache().filter(m=>isPendingRecord(m)&&!fromServer.some(s=>Number(s.id)===Number(m.id)));
+    if(pending.length){
+      const q=loadQueue();
+      pending.forEach(m=>{ if(!q.some(x=>x.op==='create'&&Number(x.localId)===Number(m.id))) q.push({op:'create',localId:m.id,payload:maintenancePayload(m)}); });
+      saveQueue(q);
+    }
+    if(loadQueue().length) await flushMaintenanceQueue();
   }
 
   function setConnStatus(on){
@@ -347,29 +508,69 @@ const App = (function() {
     data.tipo_oleo=(data.tipo_oleo||'').trim().toUpperCase()||null;
     if(data.tipo==='TROCA DE ÓLEO'){ if(!data.servico) data.servico='Troca de óleo'; }
     else if(!data.servico){ return alert('Informe o serviço/descrição da manutenção.'); }
-    if(online){
-      try{
-        const saved=await api(editingMaintenance?`/manutencoes/${editingMaintenance}`:'/manutencoes',{method:editingMaintenance?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-        if(editingMaintenance){const i=maintenances.findIndex(x=>Number(x.id)===editingMaintenance);if(i>=0)maintenances[i]=saved;}
-        else maintenances.unshift(saved);
-        saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); toast(data.tipo==='TROCA DE ÓLEO'?'Troca de óleo salva!':'Manutenção salva!'); return;
-      }catch(e){ toast('API falhou — salvando só neste dispositivo.','aviso'); }
+    // SEMPRE tenta a API primeiro (independe da flag online)
+    try{
+      const saved=await api(editingMaintenance?`/manutencoes/${editingMaintenance}`:'/manutencoes',{method:editingMaintenance?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+      if(editingMaintenance){const i=maintenances.findIndex(x=>Number(x.id)===editingMaintenance);if(i>=0)maintenances[i]=saved;}
+      else maintenances.unshift(saved);
+      saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges();
+      if(loadQueue().length) flushMaintenanceQueue(); // aproveita para drenar a fila
+      toast(data.tipo==='TROCA DE ÓLEO'?'Troca de óleo salva!':'Manutenção salva!'); return;
+    }catch(e){
+      if(!isOfflineError(e)){ toast('Não foi possível salvar: '+e.message,'aviso'); return; }
+      online=false; setConnStatus(false); // API fora do ar
     }
-    const local={...data,id:editingMaintenance||Date.now(),placa:vehicles.find(v=>Number(v.id)===Number(data.vehicle_id))?.placa||null,data_entrada:data.data};
-    if(editingMaintenance){const i=maintenances.findIndex(x=>Number(x.id)===editingMaintenance);if(i>=0)maintenances[i]={...maintenances[i],...local};}
-    else maintenances.unshift(local);
-    saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); toast('Registro salvo localmente!','aviso');
+    // API indisponível: salva localmente E enfileira para sincronizar depois
+    const existing=editingMaintenance?maintenances.find(x=>Number(x.id)===Number(editingMaintenance)):null;
+    const wasPending=existing?isPendingRecord(existing):false;
+    let local;
+    if(existing){
+      local={...existing,...data,_pending:true,_op:wasPending?'create':'update'};
+      const i=maintenances.findIndex(x=>Number(x.id)===Number(editingMaintenance)); if(i>=0)maintenances[i]=local;
+    }else{
+      local={...data,id:Date.now(),placa:vehicles.find(v=>Number(v.id)===Number(data.vehicle_id))?.placa||null,data_entrada:data.data,_pending:true,_op:'create'};
+      maintenances.unshift(local);
+    }
+    const q=loadQueue();
+    const entry=local._op==='update'
+      ?{op:'update',id:local.id,payload:maintenancePayload(local)}
+      :{op:'create',localId:local.id,payload:maintenancePayload(local)};
+    const qi=local._op==='update'
+      ?q.findIndex(x=>x.op==='update'&&Number(x.id)===Number(local.id))
+      :q.findIndex(x=>x.op==='create'&&Number(x.localId)===Number(local.id));
+    if(qi>=0)q[qi]=entry; else q.push(entry);
+    saveQueue(q);
+    saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges();
+    toast('Sem conexão com a API — registro salvo neste dispositivo e será sincronizado automaticamente.','aviso');
   }
 
   async function deleteMaintenance(id){
     const item=maintenances.find(x=>Number(x.id)===Number(id));
     const label=item?.tipo==='TROCA DE ÓLEO'?'troca de óleo':'manutenção';
     if(!confirm(`Excluir o registro de ${label} de ${dateLabel(item?.data)}?`))return;
-    if(online){
-      try{await api('/manutencoes/'+id,{method:'DELETE'});maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));saveMaintCache();renderMaintenance();renderOilChanges();toast('Registro excluído!');return;}
-      catch{toast('API falhou — exclusão só neste dispositivo.','aviso');}
+    // SEMPRE tenta a API primeiro (independe da flag online)
+    try{
+      await api('/manutencoes/'+id,{method:'DELETE'});
+      maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));
+      saveMaintCache(); renderMaintenance(); renderOilChanges();
+      if(loadQueue().length) flushMaintenanceQueue(); // aproveita para drenar a fila
+      toast('Registro excluído!'); return;
+    }catch(e){
+      if(!isOfflineError(e)){ toast('Não foi possível excluir: '+e.message,'aviso'); return; }
+      online=false; setConnStatus(false); // API fora do ar
     }
-    maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));saveMaintCache();renderMaintenance();renderOilChanges();toast('Registro excluído localmente!','aviso');
+    // API indisponível: exclui localmente E enfileira a exclusão (ou descarta create pendente)
+    const q=loadQueue();
+    if(isPendingRecord(item)){
+      saveQueue(q.filter(x=>!(x.op==='create'&&Number(x.localId)===Number(id))));
+      toast('Registro excluído neste dispositivo (ainda não sincronizado com a API).','aviso');
+    }else{
+      if(!q.some(x=>x.op==='delete'&&Number(x.id)===Number(id))) q.push({op:'delete',id:Number(id)});
+      saveQueue(q);
+      toast('Registro excluído localmente — a exclusão será sincronizada quando a API voltar.','aviso');
+    }
+    maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));
+    saveMaintCache(); renderMaintenance(); renderOilChanges();
   }
 
   // ============ TROCA DE ÓLEO (visão ligada à Manutenção) ============
@@ -431,43 +632,69 @@ const App = (function() {
     d.status=(d.status||'ATIVO').toUpperCase();
     if(vehicles.find(x=>x.placa===d.placa&&x.id!==editingVehicle))return alert('Placa já cadastrada');
 
-    if(online){
-      try{
-        if(editingVehicle){
-          const upd=await api('/vehicles/'+editingVehicle,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
-          const idx=vehicles.findIndex(v=>v.id===editingVehicle); if(idx>=0)vehicles[idx]=upd;
-        }else{
-          const novo=await api('/vehicles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
-          vehicles.push(novo);
-        }
-        saveCache(); closeModal('vehicle-modal'); renderVehicles(); renderDashboard(); toast('Veículo salvo!');
-        return;
-      }catch(e){
-        toast('API falhou — salvando só neste dispositivo.','aviso');
-        online=false; setConnStatus(false);
+    // SEMPRE tenta a API primeiro (independe da flag online)
+    try{
+      if(editingVehicle){
+        const upd=await api('/vehicles/'+editingVehicle,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+        const idx=vehicles.findIndex(v=>v.id===editingVehicle); if(idx>=0)vehicles[idx]=upd;
+      }else{
+        const novo=await api('/vehicles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+        vehicles.push(novo);
       }
+      saveCache(); closeModal('vehicle-modal'); renderVehicles(); renderDashboard(); toast('Veículo salvo!');
+      if(loadVehicleQueue().length) flushVehicleQueue(); // aproveita para drenar a fila
+      return;
+    }catch(e){
+      if(!isOfflineError(e)){ toast('Não foi possível salvar o veículo: '+e.message,'aviso'); return; }
+      online=false; setConnStatus(false); // API fora do ar
     }
 
-    // Fallback local
-    if(editingVehicle){const idx=vehicles.findIndex(v=>v.id===editingVehicle);if(idx>=0)vehicles[idx]={...vehicles[idx],...d};}
-    else{d.id=Date.now();vehicles.push(d);}
-    saveCache(); closeModal('vehicle-modal'); renderVehicles(); renderDashboard(); toast('Veículo salvo localmente!');
+    // Fallback local: salva no dispositivo E enfileira para sincronizar depois
+    const q=loadVehicleQueue();
+    if(editingVehicle){
+      const idx=vehicles.findIndex(v=>v.id===editingVehicle);
+      if(idx>=0)vehicles[idx]={...vehicles[idx],...d,_pending:true,_op:'update'};
+      const entry={op:'update',id:editingVehicle,payload:vehiclePayload(d)};
+      const qi=q.findIndex(x=>x.op==='update'&&Number(x.id)===Number(editingVehicle));
+      if(qi>=0)q[qi]=entry; else q.push(entry);
+      saveVehicleQueue(q);
+    }else{
+      const local={...d,id:Date.now(),_pending:true,_op:'create'};
+      vehicles.push(local);
+      const entry={op:'create',localId:local.id,payload:vehiclePayload(local)};
+      const qi=q.findIndex(x=>x.op==='create'&&Number(x.localId)===Number(local.id));
+      if(qi>=0)q[qi]=entry; else q.push(entry);
+      saveVehicleQueue(q);
+    }
+    saveCache(); closeModal('vehicle-modal'); renderVehicles(); renderDashboard();
+    toast('Veículo salvo localmente — será sincronizado quando a API voltar.','aviso');
   }
 
   async function deleteVehicle(id){
     const v=vehicles.find(x=>x.id===id); if(!confirm('Excluir '+v?.placa+'?'))return;
-    if(online){
-      try{
-        await api('/vehicles/'+id,{method:'DELETE'});
-        vehicles=vehicles.filter(x=>x.id!==id);
-        saveCache(); renderVehicles(); renderDashboard(); toast('Veículo excluído');
-        return;
-      }catch{
-        toast('API falhou — exclusão só neste dispositivo.','aviso');
-        online=false; setConnStatus(false);
-      }
+    // SEMPRE tenta a API primeiro (independe da flag online)
+    try{
+      await api('/vehicles/'+id,{method:'DELETE'});
+      vehicles=vehicles.filter(x=>x.id!==id);
+      saveCache(); renderVehicles(); renderDashboard();
+      if(loadVehicleQueue().length) flushVehicleQueue(); // aproveita para drenar a fila
+      toast('Veículo excluído');
+      return;
+    }catch(e){
+      if(!isOfflineError(e)){ toast('Não foi possível excluir o veículo: '+e.message,'aviso'); return; }
+      online=false; setConnStatus(false); // API fora do ar
     }
-    vehicles=vehicles.filter(x=>x.id!==id); saveCache(); renderVehicles(); renderDashboard(); toast('Veículo excluído localmente');
+    // API indisponível: exclui localmente E enfileira a exclusão (ou descarta create pendente)
+    const q=loadVehicleQueue();
+    if(v&&isPendingRecord(v)){
+      saveVehicleQueue(q.filter(x=>!(x.op==='create'&&Number(x.localId)===Number(id))));
+      toast('Veículo excluído neste dispositivo (ainda não sincronizado com a API).','aviso');
+    }else{
+      if(!q.some(x=>x.op==='delete'&&Number(x.id)===Number(id))) q.push({op:'delete',id:Number(id)});
+      saveVehicleQueue(q);
+      toast('Veículo excluído localmente — a exclusão será sincronizada quando a API voltar.','aviso');
+    }
+    vehicles=vehicles.filter(x=>x.id!==id); saveCache(); renderVehicles(); renderDashboard();
   }
 
   function closeModal(id){const el=document.getElementById(id);if(el)el.classList.remove('active');}
