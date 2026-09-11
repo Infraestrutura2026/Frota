@@ -502,6 +502,9 @@ a:focus-visible {
 .empty-state { padding: 24px !important; color: var(--text-muted); font-style: italic; text-align: center; }
 
 .placa-badge { display: inline-block; padding: 4px 9px; border-radius: 6px; color: #fff; background: var(--navy); font-family: Consolas, "Courier New", monospace; font-size: .76rem; font-weight: 700; letter-spacing: 1.2px; }
+.placa-badge-clickable { cursor: pointer; transition: filter .15s ease; }
+.placa-badge-clickable:hover { filter: brightness(1.45); }
+.placa-badge-clickable:focus-visible { filter: brightness(1.45); outline: 2px solid var(--gold-light); outline-offset: 2px; }
 .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .66rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
 .badge.success { color: var(--success); background: var(--success-soft); }
 .badge.danger { color: var(--danger); background: var(--danger-soft); }
@@ -566,6 +569,17 @@ a:focus-visible {
 
 .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
 .modal-header h3 { color: var(--navy); font-size: 1.1rem; }
+
+.modal-card-wide { max-width: 860px; }
+
+/* Histórico do veículo (modal aberto ao clicar na placa do Painel Geral) */
+.history-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.history-vehicle { display: flex; align-items: center; gap: 12px; }
+.history-vehicle > div { display: flex; flex-direction: column; gap: 2px; }
+.history-vehicle strong { color: var(--navy); font-size: .95rem; }
+.history-vehicle span { color: var(--text-muted); font-size: .76rem; }
+.history-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.history-empty { padding: 28px; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-muted); font-size: .84rem; font-style: italic; text-align: center; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
 .form-field { display: flex; flex-direction: column; gap: 6px; }
 .form-field span { color: var(--text-muted); font-size: .7rem; }
