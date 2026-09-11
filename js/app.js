@@ -7,6 +7,7 @@ const App = (function() {
   let editingMaintenance = null;
   let historyVehicle = null;
   let historyFilter = 'TODOS'; // TODOS | MANUT | OLEO
+  let historyMonth = '';        // filtro de mês (YYYY-MM) escolhido no gráfico
   let historySyncing = false;
   let online = false;
 
@@ -427,7 +428,8 @@ const App = (function() {
     document.getElementById('dashboard-groups-count').textContent=`${vehicles.length} veículos · ${ks.length} grupos`;
     g.innerHTML=ks.map(gr=>{
       const i=info(gr); const gv=vehicles.filter(v=>norm(v.grupo)===gr);
-      const items=gv.map(v=>`<button type="button" class="dashboard-vehicle-item" onclick="App.editVehicle(${v.id})"><span class="dashboard-vehicle-topline"><span class="placa-badge placa-badge-clickable" role="button" tabindex="0" title="Ver histórico de manutenção e troca de óleo deste veículo" aria-label="Ver histórico de manutenção de ${esc(formatPlacaMercosul(v.placa))}" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();App.openVehicleHistory(event, ${Number(v.id)});}">${esc(formatPlacaMercosul(v.placa))} 🔧</span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span></button>`).join('');
+      // O cartão inteiro abre o histórico; a edição do veículo fica no botão de lápis.
+      const items=gv.map(v=>`<div class="dashboard-vehicle-item" role="button" tabindex="0" title="Ver histórico de manutenção de ${esc(formatPlacaMercosul(v.placa))}" aria-label="Ver histórico de manutenção de ${esc(formatPlacaMercosul(v.placa))}" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}"><span class="dashboard-vehicle-topline"><span class="placa-badge placa-badge-clickable">${esc(formatPlacaMercosul(v.placa))} 🔧</span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong><span class="dashboard-vehicle-foot"><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span><button type="button" class="btn btn-sm btn-icon dashboard-vehicle-edit" title="Editar veículo" aria-label="Editar ${esc(formatPlacaMercosul(v.placa))}" onclick="event.stopPropagation();App.editVehicle(${Number(v.id)})">✏️</button></span></div>`).join('');
       return `<section class="fleet-group-module dashboard-group-module ${i.cls}"><div class="fleet-group-header"><div class="fleet-group-heading"><span class="fleet-group-icon">${i.icon}</span><div><h4>${i.label}</h4><span>Visão rápida</span></div></div><span class="fleet-group-count">${gv.length} veículo(s)</span></div><div class="dashboard-vehicle-list">${items}</div></section>`;
     }).join('');
   }
@@ -438,6 +440,7 @@ const App = (function() {
     if(ev){ ev.stopPropagation(); ev.preventDefault(); } // não abre o editar do cartão
     historyVehicle=Number(id);
     historyFilter='TODOS';
+    historyMonth='';
     renderVehicleHistory();
     const m=document.getElementById('vehicle-history-modal'); if(m)m.classList.add('active');
     await syncVehicleHistory(); // busca na API as OS mais recentes (outro computador pode ter lançado)
@@ -479,8 +482,85 @@ const App = (function() {
         const isOil=(m.tipo||'').toUpperCase()==='TROCA DE ÓLEO';
         return historyFilter==='TODOS'||(historyFilter==='OLEO'?isOil:!isOil);
       })
+      .filter(m=>!historyMonth||String(m.data||'').slice(0,7)===historyMonth)
       .slice()
       .sort((a,b)=>String(b.data||'').slice(0,10).localeCompare(String(a.data||'').slice(0,10))||Number(b.id||0)-Number(a.id||0));
+  }
+
+  // Clica numa barra do gráfico para filtrar a tabela por aquele mês (clicar de novo limpa)
+  function setHistoryMonth(m){ historyMonth=(m&&m!==historyMonth)?m:''; renderVehicleHistory(); }
+
+  function monthLabel(key){
+    const p=String(key||'').split('-'); return p.length===2?`${p[1]}/${p[0]}`:String(key||'');
+  }
+  function daysBetween(from,to){
+    const a=Date.parse(String(from||'').slice(0,10)), b=Date.parse(String(to||'').slice(0,10));
+    if(isNaN(a)||isNaN(b)||b<a)return null;
+    return Math.round((b-a)/86400000);
+  }
+
+  // Custo agregado por mês (máximo de 12 meses exibidos)
+  function historyMonthlyCosts(){
+    const map=new Map();
+    historyAllItems().forEach(m=>{
+      const k=String(m.data||'').slice(0,7); if(!k)return;
+      const cur=map.get(k)||{custo:0,total:0};
+      cur.custo+=Number(m.custo||0); cur.total+=1; map.set(k,cur);
+    });
+    return [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0])).slice(-12);
+  }
+
+  // Média de km rodados entre manutenções e de dias parado por ordem de serviço
+  function historyStats(){
+    const asc=historyAllItems().slice().sort((a,b)=>String(a.data||'').slice(0,10).localeCompare(String(b.data||'').slice(0,10)));
+    const gaps=[], stops=[];
+    let lastKm=null;
+    asc.forEach(m=>{
+      const km=Number(m.hodometro)||null;
+      if(km!=null){ if(lastKm!=null&&km>lastKm)gaps.push(km-lastKm); lastKm=km; }
+      const d=daysBetween(m.data,m.data_saida); if(d!=null)stops.push(d);
+    });
+    const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
+    return {mediaKm:avg(gaps),mediaDias:avg(stops),qtdGaps:gaps.length,qtdStops:stops.length};
+  }
+
+  function renderHistoryOverview(){
+    if(!historyAllItems().length)return '';
+    const money=n=>'R$ '+Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const months=historyMonthlyCosts();
+    const max=Math.max(...months.map(([,v])=>v.custo),1);
+    const totalPeriodo=months.reduce((s,[,v])=>s+v.custo,0);
+    const bars=months.map(([k,v])=>{
+      const h=Math.max(8,Math.round(v.custo/max*100));
+      const [y,mo]=k.split('-');
+      return `<button type="button" class="chart-col ${historyMonth===k?'is-active':''}" title="${mo}/${y} — ${v.total} registro(s), ${money(v.custo)}" aria-label="Filtrar ${mo}/${y}" onclick="App.setHistoryMonth('${k}')"><span class="chart-amount">${v.custo?money(v.custo):'—'}</span><span class="chart-track"><span class="chart-bar" style="height:${h}%"></span></span><span class="chart-month">${mo}/${String(y).slice(2)}</span></button>`;
+    }).join('');
+    // Linha do tempo (ordem cronológica) com o intervalo em km desde a manutenção anterior
+    const asc=historyAllItems().slice().sort((a,b)=>String(a.data||'').slice(0,10).localeCompare(String(b.data||'').slice(0,10))||Number(a.id||0)-Number(b.id||0));
+    let lastKm=null;
+    const timeline=asc.map(m=>{
+      const km=Number(m.hodometro)||null;
+      const delta=(km!=null&&lastKm!=null&&km>lastKm)?`+ ${(km-lastKm).toLocaleString('pt-BR')} km desde a intervenção anterior`:'';
+      if(km!=null)lastKm=km;
+      const dias=daysBetween(m.data,m.data_saida);
+      const meta=[km!=null?`${km.toLocaleString('pt-BR')} km`:'',m.oficina||'',money(m.custo)].filter(Boolean).join(' · ');
+      return `<li class="tl-item"><span class="tl-dot badge-${tipoBadge(m.tipo)}"></span><div class="tl-body"><div class="tl-top"><strong>${dateLabel(m.data)}</strong><span class="badge ${tipoBadge(m.tipo)}">${esc(m.tipo||'-')}</span>${dias!=null?`<span class="tl-tag">${dias} ${dias===1?'dia':'dias'} parado</span>`:''}</div><span class="tl-servico">${esc(m.servico||'-')}</span><span class="tl-meta">${esc(meta)}</span>${delta?`<span class="tl-delta">${delta}</span>`:''}</div></li>`;
+    }).join('');
+    const st=historyStats();
+    const notes=[
+      st.mediaKm!=null?`média de ${Math.round(st.mediaKm).toLocaleString('pt-BR')} km entre manutenções`:'',
+      st.mediaDias!=null?`${(Math.round(st.mediaDias*10)/10).toLocaleString('pt-BR')} dia(s) parado por OS`:''
+    ].filter(Boolean).join(' · ');
+    return `<div class="history-overview">
+      <section class="history-panel">
+        <div class="history-panel-head"><h4>Custo por mês</h4><span>${money(totalPeriodo)} no período · clique numa barra para filtrar</span></div>
+        <div class="history-chart${months.length>6?' chart-dense':''}">${bars}</div>
+      </section>
+      <section class="history-panel">
+        <div class="history-panel-head"><h4>Linha do tempo</h4><span>${esc(notes||'sem dados de hodômetro suficientes')}</span></div>
+        <ol class="history-timeline">${timeline}</ol>
+      </section>
+    </div>`;
   }
 
   function exportHistoryCsv(){
@@ -530,7 +610,8 @@ const App = (function() {
     ].join('');
     const vid=Number(historyVehicle);
     const filters=[['TODOS','Todos'],['MANUT','Manutenções'],['OLEO','Trocas de óleo']]
-      .map(([k,l])=>`<button type="button" class="btn btn-sm ${historyFilter===k?'btn-primary':''}" onclick="App.setHistoryFilter('${k}')">${l}</button>`).join('');
+      .map(([k,l])=>`<button type="button" class="btn btn-sm ${historyFilter===k?'btn-primary':''}" onclick="App.setHistoryFilter('${k}')">${l}</button>`).join('')
+      +(historyMonth?`<button type="button" class="btn btn-sm btn-primary" title="Remover filtro de mês" onclick="App.setHistoryMonth('')">📅 ${esc(monthLabel(historyMonth))} ✕</button>`:'');
     const actions=`
       <button type="button" class="btn btn-sm btn-primary" onclick="App.openMaintenanceModal(null, ${vid})">＋ Nova manutenção</button>
       <button type="button" class="btn btn-sm" onclick="App.openMaintenanceModal('TROCA DE ÓLEO', ${vid})">◉ Troca de óleo</button>
@@ -560,6 +641,7 @@ const App = (function() {
         <div class="history-filters">${filters}</div>
         <div class="history-actions">${actions}</div>
       </div>
+      ${renderHistoryOverview()}
       ${items.length?`<div class="table-responsive"><table class="data-table"><thead><tr><th>Data</th><th>Tipo</th><th>Serviço</th><th>Oficina</th><th>Hodômetro</th><th>Status OS</th><th>Custo</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`:empty}`;
   }
 
@@ -859,5 +941,5 @@ const App = (function() {
 
   function closeModal(id){const el=document.getElementById(id);if(el)el.classList.remove('active');}
 
-  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,openVehicleHistory,renderVehicleHistory,syncVehicleHistory,setHistoryFilter,exportHistoryCsv,formatPlacaMercosul,closeModal,switchPage:page};
+  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,openVehicleHistory,renderVehicleHistory,syncVehicleHistory,setHistoryFilter,setHistoryMonth,exportHistoryCsv,formatPlacaMercosul,closeModal,switchPage:page};
 })();

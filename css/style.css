@@ -43,7 +43,9 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
-a:focus-visible {
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex="0"]:focus-visible {
   outline: 3px solid rgba(201, 162, 39, .55);
   outline-offset: 2px;
 }
@@ -490,6 +492,9 @@ a:focus-visible {
 .dashboard-vehicle-item strong { font-size: .84rem; }
 .dashboard-vehicle-topline { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dashboard-vehicle-km { color: var(--text-muted); font-size: .72rem; }
+.dashboard-vehicle-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dashboard-vehicle-edit { margin-right: -4px; padding: 2px 6px; font-size: .78rem; line-height: 1; opacity: .65; }
+.dashboard-vehicle-item:hover .dashboard-vehicle-edit { opacity: 1; }
 
 /* ============ TABELAS E BADGES ============ */
 
@@ -587,6 +592,43 @@ a:focus-visible {
 .history-vehicle .badge { align-self: flex-start; }
 .history-syncing { color: var(--text-muted); font-size: .72rem; font-style: italic; }
 .history-head .history-vehicle > div { flex: 1; }
+
+/* Gráfico de custo por mês + linha do tempo do histórico */
+.history-overview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-bottom: 18px; }
+.history-panel { padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius); background: #fbfdff; }
+.history-panel-head { display: flex; flex-direction: column; gap: 3px; margin-bottom: 14px; }
+.history-panel-head h4 { color: var(--navy); font-size: .84rem; }
+.history-panel-head span { color: var(--text-muted); font-size: .7rem; }
+
+.history-chart { display: flex; align-items: stretch; gap: 6px; height: 160px; }
+.chart-col { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: center; gap: 5px; padding: 0; border: 0; background: none; cursor: pointer; }
+.chart-amount { color: var(--text-muted); font-size: .62rem; font-weight: 700; white-space: nowrap; }
+.chart-track { display: flex; width: 100%; min-height: 0; flex: 1; align-items: flex-end; justify-content: center; }
+.chart-bar { width: 100%; max-width: 34px; border-radius: 5px 5px 0 0; background: linear-gradient(180deg, var(--primary), #93b4f7); transition: filter .15s ease; }
+.chart-col:hover .chart-bar,
+.chart-col.is-active .chart-bar { filter: brightness(1.12) saturate(1.25); box-shadow: 0 0 0 2px rgba(29, 78, 216, .25); }
+.chart-month { color: var(--text-muted); font-size: .64rem; white-space: nowrap; }
+.chart-col.is-active .chart-amount,
+.chart-col.is-active .chart-month { color: var(--primary-dark); }
+/* com muitos meses, os valores aparecem só na barra em foco (evita sobreposição) */
+.chart-dense .chart-amount { opacity: 0; transition: opacity .15s ease; }
+.chart-dense .chart-col:hover .chart-amount,
+.chart-dense .chart-col.is-active .chart-amount { position: relative; z-index: 1; opacity: 1; }
+
+.history-timeline { display: flex; max-height: 210px; flex-direction: column; gap: 14px; overflow-y: auto; list-style: none; padding-right: 6px; }
+.tl-item { display: flex; gap: 10px; }
+.tl-dot { flex: none; width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--border); }
+.tl-dot.badge-success { background: var(--success); }
+.tl-dot.badge-danger { background: var(--danger); }
+.tl-dot.badge-warning { background: var(--warning); }
+.tl-dot.badge-default { background: #94a3b8; }
+.tl-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tl-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.tl-top strong { color: var(--navy); font-size: .78rem; }
+.tl-tag { padding: 2px 7px; border-radius: 999px; color: var(--text-muted); background: #eef2f7; font-size: .62rem; font-weight: 700; }
+.tl-servico { color: var(--text); font-size: .78rem; }
+.tl-meta { color: var(--text-muted); font-size: .7rem; }
+.tl-delta { color: var(--primary-dark); font-size: .68rem; font-weight: 700; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
 .form-field { display: flex; flex-direction: column; gap: 6px; }
 .form-field span { color: var(--text-muted); font-size: .7rem; }
@@ -622,6 +664,7 @@ a:focus-visible {
   .user-name-text { display: none; }
   .content { padding: 22px 20px 30px; }
   .dashboard-groups { grid-template-columns: 1fr; }
+  .history-overview { grid-template-columns: 1fr; }
   .oil-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .vehicles-toolbar input[type="search"] { min-width: 100%; }
   .vehicle-count { margin-left: 0; }
