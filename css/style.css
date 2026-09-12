@@ -473,27 +473,29 @@ a:focus-visible,
 .fleet-group-heading span { color: var(--text-muted); font-size: .72rem; }
 .fleet-group-count { padding: 4px 11px; border-radius: 999px; color: var(--primary-dark); background: var(--primary-soft); font-size: .75rem; font-weight: 700; }
 
-.dashboard-vehicle-list { display: flex; max-height: 300px; flex-direction: column; gap: 6px; overflow-y: auto; padding: 8px; }
+.dashboard-vehicle-list { display: flex; max-height: 420px; flex-direction: column; gap: 10px; overflow-y: auto; padding: 12px; }
 .dashboard-vehicle-item {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px;
+  justify-content: space-between;
+  gap: 9px;
+  min-height: 104px;
+  padding: 14px 15px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--text);
   background: #fff;
   cursor: pointer;
-  font-size: .82rem;
+  font-size: .86rem;
   text-align: left;
   transition: border-color .15s, box-shadow .15s, transform .1s;
 }
 .dashboard-vehicle-item:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(29, 78, 216, .15); transform: translateY(-1px); }
-.dashboard-vehicle-item strong { font-size: .84rem; }
+.dashboard-vehicle-item strong { font-size: .95rem; line-height: 1.3; }
 .dashboard-vehicle-topline { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.dashboard-vehicle-km { color: var(--text-muted); font-size: .72rem; }
+.dashboard-vehicle-km { color: var(--text-muted); font-size: .78rem; }
 .dashboard-vehicle-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.dashboard-vehicle-edit { margin-right: -4px; padding: 2px 6px; font-size: .78rem; line-height: 1; opacity: .65; }
+.dashboard-vehicle-edit { margin-right: -4px; padding: 4px 8px; font-size: .88rem; line-height: 1; opacity: .65; }
 .dashboard-vehicle-item:hover .dashboard-vehicle-edit { opacity: 1; }
 
 /* ============ TABELAS E BADGES ============ */
