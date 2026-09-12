@@ -622,7 +622,8 @@ const App = (function() {
       const prox=m.proxima_manutencao?`<small class="table-subtitle">próx. ${Number(m.proxima_manutencao).toLocaleString('pt-BR')} km</small>`:'';
       const saida=m.data_saida?`<small class="table-subtitle">saída ${dateLabel(m.data_saida)}</small>`:'';
       const extra=[m.tipo_oleo?`óleo ${m.tipo_oleo}${m.quantidade?` (${Number(m.quantidade).toLocaleString('pt-BR',{maximumFractionDigits:2})} L)`:''}`:'',m.itens?`peças: ${m.itens}`:'',m.observacoes?`obs: ${m.observacoes}`:''].filter(Boolean).join(' · ');
-      return `<tr><td>${dateLabel(m.data)}${saida}</td><td><span class="badge ${tipoBadge(m.tipo)}">${esc(m.tipo||'-')}</span></td><td>${esc(m.servico||'-')}${extra?`<small class="table-subtitle">${esc(extra)}</small>`:''}</td><td>${esc(m.oficina||'-')}</td><td>${km}${prox}</td><td><span class="badge ${osBadge(m.status_os)}">${esc(m.status_os||'-')}</span></td><td>${m.custo==null?'-':money(m.custo)}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(m.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(m.id)})">🗑️</button></td></tr>`;
+      const oficinaInline=m.oficina?`<span class="history-oficina-inline">Oficina: ${esc(m.oficina)}</span>`:'';
+      return `<tr><td>${dateLabel(m.data)}${saida}</td><td><span class="badge ${tipoBadge(m.tipo)}">${esc(m.tipo||'-')}</span></td><td class="history-col-servico">${esc(m.servico||'-')}${extra?`<small class="table-subtitle">${esc(extra)}</small>`:''}${oficinaInline}</td><td class="history-col-oficina">${esc(m.oficina||'-')}</td><td>${km}${prox}</td><td class="history-col-status"><span class="badge ${osBadge(m.status_os)}">${esc(m.status_os||'-')}</span></td><td>${m.custo==null?'-':money(m.custo)}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(m.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(m.id)})">🗑️</button></td></tr>`;
     }).join('');
     const empty = todos.length===0
       ? `<div class="history-empty">Nenhuma manutenção ou troca de óleo registrada para este veículo.<div class="history-empty-actions"><button type="button" class="btn btn-sm btn-primary" onclick="App.openMaintenanceModal(null, ${vid})">＋ Registrar manutenção</button><button type="button" class="btn btn-sm" onclick="App.openMaintenanceModal('TROCA DE ÓLEO', ${vid})">◉ Registrar troca de óleo</button></div></div>`
@@ -642,7 +643,7 @@ const App = (function() {
         <div class="history-actions">${actions}</div>
       </div>
       ${renderHistoryOverview()}
-      ${items.length?`<div class="table-responsive"><table class="data-table"><thead><tr><th>Data</th><th>Tipo</th><th>Serviço</th><th>Oficina</th><th>Hodômetro</th><th>Status OS</th><th>Custo</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`:empty}`;
+      ${items.length?`<div class="table-responsive"><table class="data-table history-table"><thead><tr><th>Data</th><th>Tipo</th><th class="history-col-servico">Serviço</th><th class="history-col-oficina">Oficina</th><th>Hodômetro</th><th class="history-col-status">Status OS</th><th>Custo</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`:empty}`;
   }
 
   function renderVehicles(){
