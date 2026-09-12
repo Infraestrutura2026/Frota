@@ -506,10 +506,18 @@ a:focus-visible,
 .data-table td:last-child { display: flex; gap: 6px; }
 .empty-state { padding: 24px !important; color: var(--text-muted); font-style: italic; text-align: center; }
 
-.placa-badge { display: inline-block; padding: 4px 9px; border-radius: 6px; color: #fff; background: var(--navy); font-family: Consolas, "Courier New", monospace; font-size: .76rem; font-weight: 700; letter-spacing: 1.2px; }
-.placa-badge-clickable { cursor: pointer; transition: filter .15s ease; }
-.placa-badge-clickable:hover { filter: brightness(1.45); }
-.placa-badge-clickable:focus-visible { filter: brightness(1.45); outline: 2px solid var(--gold-light); outline-offset: 2px; }
+/* Placa no padrão Mercosul: fundo branco, faixa azul "BRASIL" com emblema e caracteres azuis */
+.placa-badge { display: inline-flex; flex-direction: column; overflow: hidden; background: #fff; border: 1px solid #93a0b4; border-radius: 5px; box-shadow: 0 1px 2px rgba(15, 23, 42, .18); font-family: Arial, "Helvetica Neue", sans-serif; vertical-align: middle; }
+.placa-badge .placa-band { display: flex; align-items: center; justify-content: center; gap: 3px; padding: 1px 6px 0; background: #0055a5; color: #fff; font-size: 6px; font-weight: 700; letter-spacing: .18em; line-height: 1.5; }
+/* emblema simplificado do Mercosul (anel + estrelas) em SVG */
+.placa-badge .placa-band::before { content: ""; width: 7px; height: 7px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Ccircle cx='6' cy='6' r='4.6' fill='none' stroke='white' stroke-width='1.4'/%3E%3Ccircle cx='6' cy='2.6' r='1' fill='white'/%3E%3Ccircle cx='3.2' cy='7.4' r='1' fill='white'/%3E%3Ccircle cx='8.8' cy='7.4' r='1' fill='white'/%3E%3C/svg%3E") center / contain no-repeat; }
+.placa-badge .placa-chars { padding: 2px 7px 3px; color: #00418f; font-size: 12.5px; font-weight: 700; letter-spacing: .12em; line-height: 1; white-space: nowrap; }
+/* placa clicável (abre o histórico): envoltório com o 🔧 fora da placa */
+.placa-click { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; border-radius: 6px; }
+.placa-click .placa-wrench { font-size: .8rem; line-height: 1; }
+.placa-click .placa-badge { transition: border-color .15s ease, box-shadow .15s ease; }
+.placa-click:hover .placa-badge { border-color: #0055a5; box-shadow: 0 1px 5px rgba(0, 85, 165, .38); }
+.placa-click:focus-visible { outline: 2px solid var(--gold-light); outline-offset: 2px; }
 .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .66rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
 .badge.success { color: var(--success); background: var(--success-soft); }
 .badge.danger { color: var(--danger); background: var(--danger-soft); }
