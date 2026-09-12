@@ -61,6 +61,14 @@ const App = (function() {
     if(/^[A-Z]{3}[0-9]{4}$/.test(s))return s.slice(0,4)+'ABCDEFGHIJ'[Number(s.charAt(4))]+s.slice(5);
     return s;
   }
+
+  // Miolo visual da placa Mercosul (faixa BRASIL + caracteres), usado nos badges
+  // do Painel Geral, tabelas e modal de histórico.
+  function placaMarkup(text){
+    const t=esc(text||'');
+    if(!t||t==='-')return '<span class="placa-chars">-</span>';
+    return `<span class="placa-band" aria-hidden="true">BRASIL</span><span class="placa-chars">${t}</span>`;
+  }
   function currentOilMonth(){ return document.getElementById('oil-month-filter')?.value || new Date().toISOString().slice(0,7); }
   function oilRecords(){ return maintenances.filter(m => (m.tipo||'').toUpperCase()==='TROCA DE ÓLEO'); }
 
@@ -405,10 +413,10 @@ const App = (function() {
   // Placa clicável nas tabelas (Manutenção / Troca de Óleo): abre o histórico do veículo,
   // igual ao clique na placa dos cartões do Painel Geral.
   function placaLink(m, plate){
-    const text=esc(formatPlacaMercosul(plate||''))||'-';
+    const text=formatPlacaMercosul(plate||'');
     const vid=Number(m?.vehicle_id)||Number(vehicles.find(x=>(x.placa||'').toUpperCase()===String(m?.placa||'').toUpperCase())?.id)||0;
-    if(!vid) return `<span class="placa-badge">${text}</span>`;
-    return `<span class="placa-badge placa-badge-clickable" role="button" tabindex="0" title="Ver histórico de manutenção e troca de óleo" onclick="App.openVehicleHistory(event, ${vid})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${vid});}">${text}</span>`;
+    if(!vid) return `<span class="placa-badge">${placaMarkup(text)}</span>`;
+    return `<span class="placa-click" role="button" tabindex="0" title="Ver histórico de manutenção e troca de óleo" onclick="App.openVehicleHistory(event, ${vid})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${vid});}"><span class="placa-badge">${placaMarkup(text)}</span></span>`;
   }
 
   function renderDashboard(){
@@ -429,7 +437,7 @@ const App = (function() {
     g.innerHTML=ks.map(gr=>{
       const i=info(gr); const gv=vehicles.filter(v=>norm(v.grupo)===gr);
       // O cartão inteiro abre o histórico; a edição do veículo fica no botão de lápis.
-      const items=gv.map(v=>`<div class="dashboard-vehicle-item" role="button" tabindex="0" title="Ver histórico de manutenção de ${esc(formatPlacaMercosul(v.placa))}" aria-label="Ver histórico de manutenção de ${esc(formatPlacaMercosul(v.placa))}" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}"><span class="dashboard-vehicle-topline"><span class="placa-badge placa-badge-clickable">${esc(formatPlacaMercosul(v.placa))} 🔧</span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong><span class="dashboard-vehicle-foot"><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span><button type="button" class="btn btn-sm btn-icon dashboard-vehicle-edit" title="Editar veículo" aria-label="Editar ${esc(formatPlacaMercosul(v.placa))}" onclick="event.stopPropagation();App.editVehicle(${Number(v.id)})">✏️</button></span></div>`).join('');
+      const items=gv.map(v=>`<div class="dashboard-vehicle-item" role="button" tabindex="0" title="Ver histórico de manutenção de ${esc(formatPlacaMercosul(v.placa))}" aria-label="Ver histórico de manutenção de ${esc(formatPlacaMercosul(v.placa))}" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}\"><span class="dashboard-vehicle-topline"><span class="placa-click"><span class="placa-badge">${placaMarkup(formatPlacaMercosul(v.placa))}</span><span class="placa-wrench" aria-hidden="true">🔧</span></span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong><span class="dashboard-vehicle-foot"><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span><button type="button" class="btn btn-sm btn-icon dashboard-vehicle-edit" title="Editar veículo" aria-label="Editar ${esc(formatPlacaMercosul(v.placa))}" onclick="event.stopPropagation();App.editVehicle(${Number(v.id)})">✏️</button></span></div>`).join('');
       return `<section class="fleet-group-module dashboard-group-module ${i.cls}"><div class="fleet-group-header"><div class="fleet-group-heading"><span class="fleet-group-icon">${i.icon}</span><div><h4>${i.label}</h4><span>Visão rápida</span></div></div><span class="fleet-group-count">${gv.length} veículo(s)</span></div><div class="dashboard-vehicle-list">${items}</div></section>`;
     }).join('');
   }
@@ -631,7 +639,7 @@ const App = (function() {
     content.innerHTML=`
       <div class="history-head">
         <div class="history-vehicle">
-          <span class="placa-badge">${esc(placa||'-')}</span>
+          <span class="placa-badge">${placaMarkup(placa)}</span>
           <div><strong>${esc(model||'Veículo')}</strong><span>${esc(meta)}</span></div>
           ${v?`<span class="badge ${badge(v.status)}">${esc(v.status||'ATIVO')}</span>`:''}
           ${historySyncing?'<span class="history-syncing">Atualizando…</span>':''}
@@ -653,7 +661,7 @@ const App = (function() {
     document.getElementById('vehicle-count').textContent=`${filt.length} de ${vehicles.length}`;
     document.getElementById('vehicles-groups').innerHTML=keys().map(gr=>{
       const i=info(gr); const gv=filt.filter(v=>norm(v.grupo)===gr);
-      const rows=gv.map(v=>`<tr><td><span class="placa-badge placa-badge-clickable" role="button" tabindex="0" title="Ver histórico de manutenção e troca de óleo" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}">${esc(formatPlacaMercosul(v.placa))}</span></td><td><b>${v.marca||''}</b> ${v.modelo||''}</td><td>${v.ano||'-'}</td><td><b>${(v.hodometro||0).toLocaleString('pt-BR')} km</b></td><td><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></td><td>${v.combustivel||'-'}</td><td><button class="btn btn-sm btn-primary" onclick="App.editVehicle(${v.id})">✏️</button><button class="btn btn-sm btn-danger" onclick="App.deleteVehicle(${v.id})">🗑️</button></td></tr>`).join('');
+      const rows=gv.map(v=>`<tr><td><span class="placa-click" role="button" tabindex="0" title="Ver histórico de manutenção e troca de óleo" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}"><span class="placa-badge">${placaMarkup(formatPlacaMercosul(v.placa))}</span></span></td><td><b>${v.marca||''}</b> ${v.modelo||''}</td><td>${v.ano||'-'}</td><td><b>${(v.hodometro||0).toLocaleString('pt-BR')} km</b></td><td><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></td><td>${v.combustivel||'-'}</td><td><button class="btn btn-sm btn-primary" onclick="App.editVehicle(${v.id})">✏️</button><button class="btn btn-sm btn-danger" onclick="App.deleteVehicle(${v.id})">🗑️</button></td></tr>`).join('');
       return `<section class="fleet-group-module ${i.cls}"><div class="fleet-group-header"><div class="fleet-group-heading"><span class="fleet-group-icon">${i.icon}</span><div><h4>${i.label}</h4><span>Veículos do grupo</span></div></div><span class="fleet-group-count">${gv.length}</span></div><div class="fleet-group-content table-responsive"><table class="data-table"><thead><tr><th>Placa</th><th>Marca/Modelo</th><th>Ano</th><th>KM</th><th>Status</th><th>Combustível</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty-state">Nenhum veículo</td></tr>'}</tbody></table></div></section>`;
     }).join('');
   }
@@ -694,7 +702,7 @@ const App = (function() {
   }
 
   function vehicleOptions(selected){
-    return ['<option value="">Selecione o veículo</option>',...vehicles.map(v=>`<option value="${Number(v.id)}" ${Number(v.id)===Number(selected)?'selected':''}>${esc(v.placa)} — ${esc(`${v.marca||''} ${v.modelo||''}`.trim())}</option>`)].join('');
+    return ['<option value="">Selecione o veículo</option>',...vehicles.map(v=>`<option value="${Number(v.id)}" ${Number(v.id)===Number(selected)?'selected':''}>${esc(formatPlacaMercosul(v.placa))} — ${esc(`${v.marca||''} ${v.modelo||''}`.trim())}</option>`)].join('');
   }
 
   // preset: tipo de manutenção (ou 'TROCA DE ÓLEO'); vehicleId: veículo já selecionado
