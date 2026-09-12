@@ -576,6 +576,8 @@ a:focus-visible,
 .modal-header h3 { color: var(--navy); font-size: 1.1rem; }
 
 .modal-card-wide { max-width: 860px; }
+/* modal extra-largo: histórico do veículo com a tabela inteira visível (sem rolagem lateral) */
+.modal-card-xl { max-width: 1180px; }
 
 /* Histórico do veículo (modal aberto ao clicar na placa do Painel Geral) */
 .history-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
@@ -592,6 +594,20 @@ a:focus-visible,
 .history-vehicle .badge { align-self: flex-start; }
 .history-syncing { color: var(--text-muted); font-size: .72rem; font-style: italic; }
 .history-head .history-vehicle > div { flex: 1; }
+
+/* Tabela do histórico: células mais compactas e colunas de texto quebrando linha,
+   para que a tabela caiba inteira no modal (sem barra de rolagem horizontal) */
+.history-table th,
+.history-table td { padding: 8px 10px; }
+.history-table .history-col-servico,
+.history-table .history-col-oficina,
+.history-table .history-col-status { white-space: normal; overflow-wrap: break-word; }
+.history-table .history-col-servico { min-width: 150px; }
+.history-table .history-col-oficina { min-width: 120px; }
+.history-table .history-col-status { min-width: 88px; }
+.history-table .history-col-status .badge { white-space: normal; overflow-wrap: normal; }
+/* oficina exibida dentro da célula de serviço quando a coluna Oficina é ocultada */
+.history-oficina-inline { display: none; }
 
 /* Gráfico de custo por mês + linha do tempo do histórico */
 .history-overview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-bottom: 18px; }
@@ -647,6 +663,14 @@ a:focus-visible,
 }
 
 /* ============ RESPONSIVO ============ */
+
+/* A partir daqui o modal do histórico deixa de ter 1180px: a coluna Oficina é ocultada
+   e a oficina passa a aparecer dentro da célula de serviço, mantendo a tabela inteira
+   visível (sem rolagem horizontal) */
+@media (max-width: 1216px) {
+  .history-table .history-col-oficina { display: none; }
+  .history-oficina-inline { display: block; margin-top: 4px; color: var(--text-muted); font-size: .7rem; }
+}
 
 @media (max-width: 859px) {
   .login-screen { grid-template-columns: 1fr; }
