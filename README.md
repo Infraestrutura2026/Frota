@@ -31,7 +31,12 @@ Frota/
 | Sem `DATABASE_URL` (local dev) | `data/db.json` |
 
 As tabelas (`vehicles`, `users` e `manutencoes`) são **criadas automaticamente** na primeira
-chamada à API, já com os 29 veículos e o usuário admin. A tabela `manutencoes` concentra
+chamada à API, já com os 29 veículos e o usuário admin. A estrutura é **auto-curada**: na
+inicialização são executados `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` para todas as colunas
+do módulo de manutenção, de forma que um banco criado por uma versão anterior do app (onde
+`CREATE TABLE IF NOT EXISTS` não acrescenta colunas novas) volte a aceitar lançamentos sem
+intervenção manual. Falhas na migração de dados antigos ou na carga inicial **não** derrubam
+a API: ficam registradas no log e o salvamento continua funcionando. A tabela `manutencoes` concentra
 as **ordens de serviço de manutenção** e trata a **troca de óleo** como um tipo
 (`TROCA DE ÓLEO`). Trocas de óleo antigas (tabela `oil_changes`) são migradas
 automaticamente para `manutencoes` na primeira execução, sem ação manual.
@@ -103,3 +108,8 @@ Acesse `http://localhost:8080` — login: **admin / admin2025**
 | GET          | `/api/trocas-oleo/relatorio-mensal` | Relatório mensal |
 
 > 🔒 Senhas ficam hasheadas (SHA-256) e nunca são retornadas pela API.
+> 🔎 **Diagnóstico de erros**: respostas 500 da API trazem a causa vinda do Postgres
+> (`{"error":"Erro no servidor: column \"itens\" of relation \"manutencoes\" does not exist","sqlstate":"42703"}`)
+> e o mesmo texto sai no log da função na Vercel (`[API] POST /api/manutencoes → ...`), em vez
+> de um genérico "Erro interno no servidor.". `INSERT` com colisão de id (`23505`) é refazido
+> automaticamente, evitando erro ao lançar duas OS no mesmo instante.

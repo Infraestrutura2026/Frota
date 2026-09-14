@@ -1,7 +1,7 @@
 'use strict';
 
 // ============================================================
-// FROTA PRO v3.3 — Controle de Frota (grupos S2, S3 e S4)
+// FROTA PRO v3.6 — Controle de Frota (grupos S2, S3 e S4)
 // Servidor Node nativo: API REST + arquivos estáticos.
 //
 // Persistência:
@@ -21,7 +21,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.5';
+const VERSION = '3.6';
 
 // Hash legado mantido para compatibilidade com bancos antigos.
 const LEGACY_ADMIN_HASH = 'e6c2797fed87dd7a39f60bcfe65cf34645229671607ef506720d20d41f173b2a';
@@ -60,6 +60,14 @@ const INITIAL_VEHICLES = [
 
 function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
 
+// Senhas são gravadas como SHA-256. Um valor que já é um hash de 64 hex é preservado,
+// para não "hashear o hash" quando a API é usada para editar um usuário sem trocar a senha.
+function hashSenha(s) {
+  const t = String(s == null ? '' : s).trim();
+  if (!t) return '';
+  return /^[0-9a-f]{64}$/i.test(t) ? t.toLowerCase() : sha256(t);
+}
+
 const INITIAL_USERS = [
   { id: 1, nome: 'Administrador', usuario: 'admin', senha: sha256('admin2025'), role: 'admin', ativo: 1 }
 ];
@@ -80,9 +88,50 @@ if (DATABASE_URL) {
 // ---------- Modo Neon (Postgres) ----------
 
 let neonInitPromise = null;
-function ensureNeon() {
+
+// Estrutura da tabela de manutenções (ordens de serviço). Os ALTER TABLE abaixo são
+// o ponto importante: CREATE TABLE IF NOT EXISTS nunca acrescenta colunas a uma tabela
+// que já existe no banco. Em um Neon criado por uma versão anterior do app, o INSERT
+// passava a referenciar colunas inexistentes e todo salvamento de manutenção virava
+// erro 500. O "ADD COLUMN IF NOT EXISTS" auto-cura o banco na primeira chamada.
+const MANUT_SCHEMA = `CREATE TABLE IF NOT EXISTS manutencoes (
+        id INTEGER PRIMARY KEY,
+        vehicle_id INTEGER, veiculo_id INTEGER, placa TEXT,
+        tipo TEXT,
+        data DATE, data_saida DATE,
+        hodometro INTEGER, proxima_manutencao INTEGER,
+        servico TEXT, itens TEXT, oficina TEXT,
+        custo NUMERIC, status_os TEXT,
+        tipo_oleo TEXT, quantidade NUMERIC,
+        observacoes TEXT,
+        created_at TIMESTAMPTZ DEFAULT now()
+      )`;
+const MANUT_HEAL = `ALTER TABLE manutencoes
+  ADD COLUMN IF NOT EXISTS vehicle_id INTEGER,
+  ADD COLUMN IF NOT EXISTS veiculo_id INTEGER,
+  ADD COLUMN IF NOT EXISTS placa TEXT,
+  ADD COLUMN IF NOT EXISTS tipo TEXT,
+  ADD COLUMN IF NOT EXISTS data DATE,
+  ADD COLUMN IF NOT EXISTS data_saida DATE,
+  ADD COLUMN IF NOT EXISTS hodometro INTEGER,
+  ADD COLUMN IF NOT EXISTS proxima_manutencao INTEGER,
+  ADD COLUMN IF NOT EXISTS servico TEXT,
+  ADD COLUMN IF NOT EXISTS itens TEXT,
+  ADD COLUMN IF NOT EXISTS oficina TEXT,
+  ADD COLUMN IF NOT EXISTS custo NUMERIC,
+  ADD COLUMN IF NOT EXISTS status_os TEXT,
+  ADD COLUMN IF NOT EXISTS tipo_oleo TEXT,
+  ADD COLUMN IF NOT EXISTS quantidade NUMERIC,
+  ADD COLUMN IF NOT EXISTS observacoes TEXT,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()`;
+
+async function ensureNeon() {
   if (!neonInitPromise) {
     neonInitPromise = (async () => {
+      // 1) Estrutura. Cada statement é independente: uma falha pontual de ajuste (heal)
+      //    não pode derrubar a API inteira — era isso que fazia TODO salvamento de
+      //    manutenção voltar 500 quando o banco tinha sido criado por uma versão
+      //    anterior do app (CREATE TABLE IF NOT EXISTS nunca acrescenta colunas).
       await sql`CREATE TABLE IF NOT EXISTS vehicles (
         id INTEGER PRIMARY KEY,
         placa TEXT, grupo TEXT, marca TEXT, modelo TEXT,
@@ -94,7 +143,7 @@ function ensureNeon() {
         id INTEGER PRIMARY KEY,
         nome TEXT, usuario TEXT, senha TEXT, role TEXT, ativo INTEGER
       )`;
-      // O módulo de Troca de Óleo é auto-inicializável. O ALTER também cobre
+      // O módulo de Troca de Óleo é auto-inicializável. Os ALTER abaixo cobrem
       // bancos Neon criados por uma versão anterior do módulo.
       await sql`CREATE TABLE IF NOT EXISTS oil_changes (
         id INTEGER PRIMARY KEY,
@@ -111,53 +160,74 @@ function ensureNeon() {
         observacoes TEXT,
         created_at TIMESTAMPTZ DEFAULT now()
       )`;
-      await sql`ALTER TABLE oil_changes ADD COLUMN IF NOT EXISTS horimetro INTEGER`;
       // Módulo Manutenção (ordens de serviço) — a Troca de Óleo é um tipo.
-      await sql`CREATE TABLE IF NOT EXISTS manutencoes (
-        id INTEGER PRIMARY KEY,
-        vehicle_id INTEGER, veiculo_id INTEGER, placa TEXT,
-        tipo TEXT,
-        data DATE, data_saida DATE,
-        hodometro INTEGER, proxima_manutencao INTEGER,
-        servico TEXT, itens TEXT, oficina TEXT,
-        custo NUMERIC, status_os TEXT,
-        tipo_oleo TEXT, quantidade NUMERIC,
-        observacoes TEXT,
-        created_at TIMESTAMPTZ DEFAULT now()
-      )`;
+      await sql.query(MANUT_SCHEMA);
       await sql`CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT
       )`;
-      // Migração única: traz as trocas de óleo antigas para o novo módulo.
-      const migrated = await sql`SELECT value FROM meta WHERE key = 'oil_migrated'`;
-      if (migrated.length === 0) {
-        await sql`INSERT INTO manutencoes
-          (id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at)
-          SELECT id, COALESCE(vehicle_id, veiculo_id), COALESCE(vehicle_id, veiculo_id), placa,
-            'TROCA DE ÓLEO', COALESCE(data, data_troca), NULL, hodometro, NULL,
-            'Troca de óleo', NULL, NULL, NULL, 'CONCLUÍDA',
-            COALESCE(tipo_oleo, oleo), quantidade, observacoes, created_at
-          FROM oil_changes ON CONFLICT (id) DO NOTHING`;
-        await sql`INSERT INTO meta (key, value) VALUES ('oil_migrated', '1') ON CONFLICT (key) DO NOTHING`;
-      }
-      const vc = await sql`SELECT COUNT(*)::int AS n FROM vehicles`;
-      if (vc[0].n === 0) {
-        for (const v of INITIAL_VEHICLES) {
-          await sql`INSERT INTO vehicles (id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade)
-            VALUES (${v.id}, ${v.placa}, ${v.grupo}, ${v.marca}, ${v.modelo}, ${v.ano}, ${v.cor}, ${v.hodometro}, ${v.status}, ${v.combustivel}, ${v.capacidade})`;
+
+      // 2) Auto-cura da estrutura: acrescenta colunas que faltarem em bancos antigos.
+      for (const heal of [
+        `ALTER TABLE oil_changes ADD COLUMN IF NOT EXISTS horimetro INTEGER`,
+        MANUT_HEAL
+      ]) {
+        try {
+          await sql.query(heal);
+        } catch (e) {
+          console.error('[API] Ajuste de estrutura ignorado:', reasonDaFalha(e));
         }
       }
-      const uc = await sql`SELECT COUNT(*)::int AS n FROM users`;
-      if (uc[0].n === 0) {
-        for (const u of INITIAL_USERS) {
-          await sql`INSERT INTO users (id, nome, usuario, senha, role, ativo)
-            VALUES (${u.id}, ${u.nome}, ${u.usuario}, ${u.senha}, ${u.role}, ${u.ativo})`;
+
+      // 3) Passos que NÃO podem impedir o salvamento: migração antiga e carga inicial.
+      try {
+        const migrated = await sql`SELECT value FROM meta WHERE key = 'oil_migrated'`;
+        if (migrated.length === 0) {
+          await sql`INSERT INTO manutencoes
+            (id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at)
+            SELECT id, COALESCE(vehicle_id, veiculo_id), COALESCE(vehicle_id, veiculo_id), placa,
+              'TROCA DE ÓLEO', COALESCE(data, data_troca), NULL, hodometro, NULL,
+              'Troca de óleo', NULL, NULL, NULL, 'CONCLUÍDA',
+              COALESCE(tipo_oleo, oleo), quantidade, observacoes, created_at
+            FROM oil_changes ON CONFLICT (id) DO NOTHING`;
+          await sql`INSERT INTO meta (key, value) VALUES ('oil_migrated', '1') ON CONFLICT (key) DO NOTHING`;
         }
+      } catch (e) {
+        console.error('[API] Migração oil_changes → manutencoes ignorada:', reasonDaFalha(e));
+      }
+
+      try {
+        await seedNeonIfEmpty();
+      } catch (e) {
+        console.error('[API] Seed inicial ignorado:', reasonDaFalha(e));
       }
     })().catch((e) => { neonInitPromise = null; throw e; });
   }
   return neonInitPromise;
+}
+
+// Carga inicial (29 veículos + admin) apenas quando o banco está vazio.
+// Feita em uma única instrução por tabela, com ON CONFLICT para repetir sem dano.
+async function seedNeonIfEmpty() {
+  const vc = await sql`SELECT COUNT(*)::int AS n FROM vehicles`;
+  if (Number(vc[0] && vc[0].n) === 0) {
+    await sql`INSERT INTO vehicles (id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade)
+      SELECT * FROM unnest(${INITIAL_VEHICLES.map((v) => v.id)}::int[], ${INITIAL_VEHICLES.map((v) => v.placa)}::text[],
+        ${INITIAL_VEHICLES.map((v) => v.grupo)}::text[], ${INITIAL_VEHICLES.map((v) => v.marca)}::text[],
+        ${INITIAL_VEHICLES.map((v) => v.modelo)}::text[], ${INITIAL_VEHICLES.map((v) => v.ano)}::int[],
+        ${INITIAL_VEHICLES.map((v) => v.cor)}::text[], ${INITIAL_VEHICLES.map((v) => v.hodometro)}::int[],
+        ${INITIAL_VEHICLES.map((v) => v.status)}::text[], ${INITIAL_VEHICLES.map((v) => v.combustivel)}::text[],
+        ${INITIAL_VEHICLES.map((v) => v.capacidade)}::int[])
+      ON CONFLICT (id) DO NOTHING`;
+  }
+  const uc = await sql`SELECT COUNT(*)::int AS n FROM users`;
+  if (Number(uc[0] && uc[0].n) === 0) {
+    await sql`INSERT INTO users (id, nome, usuario, senha, role, ativo)
+      SELECT * FROM unnest(${INITIAL_USERS.map((u) => u.id)}::int[], ${INITIAL_USERS.map((u) => u.nome)}::text[],
+        ${INITIAL_USERS.map((u) => u.usuario)}::text[], ${INITIAL_USERS.map((u) => u.senha)}::text[],
+        ${INITIAL_USERS.map((u) => u.role)}::text[], ${INITIAL_USERS.map((u) => u.ativo)}::int[])
+      ON CONFLICT (id) DO NOTHING`;
+  }
 }
 
 // ---------- Modo arquivo (data/db.json) ----------
@@ -232,6 +302,40 @@ function numberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+// ---------- Ids sequenciais no Postgres ----------
+// O app usa "MAX(id)+1" em vez de uma sequence. Dois computadores salvando no mesmo
+// instante podiam calcular o mesmo id → "duplicate key value violates unique
+// constraint" → o lançamento da manutenção virava erro. A colisão é refazida com o
+// próximo id livre (é isso que retryDuplicateKey faz).
+const ID_TABLES = new Set(['manutencoes', 'vehicles', 'users', 'oil_changes']);
+
+async function nextRowId(table) {
+  if (!ID_TABLES.has(table)) throw new Error(`Tabela não permitida: ${table}`);
+  const rows = await sql.query(`SELECT COALESCE(MAX(id), 0) + 1 AS nid FROM ${table}`);
+  const id = Number(rows && rows[0] && rows[0].nid);
+  if (!Number.isInteger(id) || id < 1) throw new Error('Não foi possível obter o próximo id.');
+  return id;
+}
+
+function isUniqueViolation(e) {
+  const code = String((e && (e.code || e.sqlState)) || '');
+  return code === '23505' || /duplicate key value/i.test(reasonDaFalha(e));
+}
+
+async function retryDuplicateKey(fn, tentativas = 5) {
+  let lastError;
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      return await fn(i);
+    } catch (e) {
+      lastError = e;
+      if (!isUniqueViolation(e)) throw e;
+      await new Promise((r) => setTimeout(r, 40 * (i + 1)));
+    }
+  }
+  throw lastError;
 }
 
 // ============================================================
@@ -373,16 +477,22 @@ async function insertManutencao(body) {
   }
   if (sql) {
     await ensureNeon();
-    const ids = await sql`SELECT COALESCE(MAX(id), 0) + 1 AS nid FROM manutencoes`;
-    const id = Number(ids[0].nid);
-    await sql`INSERT INTO manutencoes
-      (id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes)
-      VALUES (${id}, ${data.vehicle_id}, ${data.veiculo_id}, ${data.placa}, ${data.tipo}, ${data.data}, ${data.data_saida},
-        ${data.hodometro}, ${data.proxima_manutencao}, ${data.servico}, ${data.itens}, ${data.oficina}, ${data.custo},
-        ${data.status_os}, ${data.tipo_oleo}, ${data.quantidade}, ${data.observacoes})`;
-    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at
-      FROM manutencoes WHERE id = ${id}`;
-    return publicManutencao(rows[0]);
+    const row = await retryDuplicateKey(async () => {
+      const id = await nextRowId('manutencoes');
+      const rows = await sql`INSERT INTO manutencoes
+        (id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes)
+        VALUES (${id}, ${data.vehicle_id}, ${data.veiculo_id}, ${data.placa}, ${data.tipo}, ${data.data}, ${data.data_saida},
+          ${data.hodometro}, ${data.proxima_manutencao}, ${data.servico}, ${data.itens}, ${data.oficina}, ${data.custo},
+          ${data.status_os}, ${data.tipo_oleo}, ${data.quantidade}, ${data.observacoes})
+        RETURNING *`;
+      return rows[0];
+    });
+    if (!row) {
+      const error = new Error('A manutenção foi enviada, mas não foi devolvida pelo banco.');
+      error.statusCode = 500;
+      throw error;
+    }
+    return publicManutencao(row);
   }
   const arr = loadFile().manutencoes;
   const item = { id: nextId(arr), ...data, created_at: new Date().toISOString() };
@@ -514,11 +624,14 @@ async function insertVehicle(body) {
   if (!d.placa) { const e = new Error('Placa é obrigatória.'); e.statusCode = 400; throw e; }
   if (sql) {
     await ensureNeon();
-    const rows = await sql`SELECT COALESCE(MAX(id), 0) + 1 AS nid FROM vehicles`;
-    const nid = rows[0].nid;
-    await sql`INSERT INTO vehicles (id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade)
-      VALUES (${nid}, ${d.placa}, ${d.grupo}, ${d.marca}, ${d.modelo}, ${d.ano}, ${d.cor}, ${d.hodometro}, ${d.status}, ${d.combustivel}, ${d.capacidade})`;
-    return { id: nid, ...d };
+    const salvo = await retryDuplicateKey(async () => {
+      const nid = await nextRowId('vehicles');
+      const rows = await sql`INSERT INTO vehicles (id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade)
+        VALUES (${nid}, ${d.placa}, ${d.grupo}, ${d.marca}, ${d.modelo}, ${d.ano}, ${d.cor}, ${d.hodometro}, ${d.status}, ${d.combustivel}, ${d.capacidade})
+        RETURNING id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade`;
+      return rows[0] || { id: nid, ...d };
+    });
+    return salvo;
   }
   const arr = loadFile().vehicles;
   const novo = { id: nextId(arr), ...d };
@@ -595,17 +708,18 @@ async function insertUser(body) {
   const u = {
     nome: String(body.nome || '').trim(),
     usuario: String(body.usuario || '').trim(),
-    senha: String(body.senha || ''),
+    senha: hashSenha(body.senha),
     role: String(body.role || 'user'),
     ativo: body.ativo === undefined ? 1 : intOrNull(body.ativo) ?? 1
   };
   if (!u.nome || !u.usuario || !u.senha) { const e = new Error('Nome, usuário e senha são obrigatórios.'); e.statusCode = 400; throw e; }
   if (sql) {
     await ensureNeon();
-    const rows = await sql`SELECT COALESCE(MAX(id), 0) + 1 AS nid FROM users`;
-    const nid = rows[0].nid;
-    await sql`INSERT INTO users (id, nome, usuario, senha, role, ativo) VALUES (${nid}, ${u.nome}, ${u.usuario}, ${u.senha}, ${u.role}, ${u.ativo})`;
-    return { id: nid, nome: u.nome, usuario: u.usuario, role: u.role, ativo: u.ativo };
+    return await retryDuplicateKey(async () => {
+      const nid = await nextRowId('users');
+      await sql`INSERT INTO users (id, nome, usuario, senha, role, ativo) VALUES (${nid}, ${u.nome}, ${u.usuario}, ${u.senha}, ${u.role}, ${u.ativo})`;
+      return { id: nid, nome: u.nome, usuario: u.usuario, role: u.role, ativo: u.ativo };
+    });
   }
   const arr = loadFile().users;
   const novo = { id: nextId(arr), ...u };
@@ -617,18 +731,20 @@ async function insertUser(body) {
 
 async function updateUser(id, body) {
   body = body || {};
+  // senha vazia/ausente = manter a que já está no banco; senão, gravar o hash.
+  const novaSenha = body.senha === undefined || String(body.senha).trim() === '' ? undefined : hashSenha(body.senha);
   if (sql) {
     await ensureNeon();
     const cur = await sql`SELECT * FROM users WHERE id = ${id}`;
     if (cur.length === 0) return null;
-    const m = { ...cur[0], ...body, id };
+    const m = { ...cur[0], ...body, id, senha: novaSenha === undefined ? cur[0].senha : novaSenha };
     await sql`UPDATE users SET nome = ${m.nome}, usuario = ${m.usuario}, senha = ${m.senha}, role = ${m.role}, ativo = ${m.ativo} WHERE id = ${id}`;
     return { id: m.id, nome: m.nome, usuario: m.usuario, role: m.role, ativo: m.ativo };
   }
   const arr = loadFile().users;
   const idx = arr.findIndex((x) => Number(x.id) === Number(id));
   if (idx === -1) return null;
-  arr[idx] = { ...arr[idx], ...body, id: arr[idx].id };
+  arr[idx] = { ...arr[idx], ...body, id: arr[idx].id, senha: novaSenha === undefined ? arr[idx].senha : novaSenha };
   saveFile();
   const { senha, ...pub } = arr[idx];
   return pub;
@@ -677,9 +793,36 @@ function parseBody(req) {
   return new Promise((ok, fail) => {
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
-    req.on('end', () => { try { ok(body ? JSON.parse(body) : {}); } catch (e) { fail(e); } });
+    req.on('end', () => {
+      try { ok(body ? JSON.parse(body) : {}); }
+      catch (e) { const err = new Error('JSON inválido no corpo da requisição.'); err.statusCode = 400; fail(err); }
+    });
     req.on('error', fail);
   });
+}
+
+// Erros do Postgres chegam como 500 genéricos ("Erro interno no servidor."), o que
+// torna impossível diagnosticar à distância. Além de logar, o texto devolvido pelo
+// navegador passa a trazer a causa real (coluna inexistente, violação de chave etc.).
+function reasonDaFalha(e) {
+  if (!e) return '';
+  // NeonDbError pode chegar com message vazio (resposta fora do formato esperado):
+  // junta o que houver (detail/hint/nome) para nunca perder a causa do erro.
+  const partes = [e.message, e.detail, e.hint].filter(Boolean).map(String);
+  if (!partes.length) partes.push(String(e.name && e.name !== 'Error' ? e.name : (e.stack ? String(e.stack).split('\n')[0] : e)));
+  return partes.join(' — ').replace(/^NeonDbError$/, 'Erro do banco de dados (Neon/Postgres)').slice(0, 400);
+}
+
+function apiError(res, req, pathname, e) {
+  const code = e && e.statusCode ? e.statusCode : 500;
+  const motivo = reasonDaFalha(e) || 'Erro interno no servidor.';
+  const sqlstate = String((e && (e.code || e.sqlState)) || '');
+  if (code === 500) {
+    console.error(`[API] ${req.method} ${pathname} → ${motivo}${sqlstate ? ` (sqlstate ${sqlstate})` : ''}`);
+    if (process.env.API_DEBUG === '1') console.error(e);
+    return json(res, 500, { error: `Erro no servidor: ${motivo}`, sqlstate: sqlstate || undefined });
+  }
+  return json(res, code, { error: motivo });
 }
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'application/javascript', '.png': 'image/png', '.json': 'application/json', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
@@ -799,9 +942,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 404, { error: 'Not found' });
     }
   } catch (e) {
-    const code = e.statusCode || 500;
-    if (code === 500) console.error('[API] Erro interno:', e);
-    return json(res, code, { error: code === 500 ? 'Erro interno no servidor.' : e.message });
+    return apiError(res, req, pathname, e);
   }
 
   // ---------- Arquivos estáticos ----------
