@@ -85,11 +85,50 @@ Acesse `http://localhost:8080` — login: **admin / admin2025**
    - `DATABASE_URL` = *connection string do Neon*
 4. Deploy. Pronto — o sistema fica online e os dados são compartilhados.
 
+### Roteamento: API primeiro
+
+O `vercel.json` declara o fallback do SPA (`/((?!api/).*) → /index.html`) e,
+**antes dele**, uma regra explícita de API:
+
+```json
+"rewrites": [
+  { "source": "/api/:path*", "destination": "/api/:path*" },
+  { "source": "/((?!api/).*)", "destination": "/index.html" }
+]
+```
+
+A ordem importa: se o fallback do SPA vier primeiro (ou se a exclusão da API
+falhar), um `POST /api/manutencoes` é respondido pelo `index.html` — volta HTML
+em vez de JSON, com 404/405 — e o salvamento quebra sem explicação. Com a regra
+`/api/:path*` na frente, todo caminho de API é resolvido pela função antes de o
+fallback ser considerado.
+
+### 🔬 Sonda de POST em produção (GitHub Actions)
+
+O workflow `.github/workflows/api-post-check.yml` sonda a API **de fora** da
+rede da corporação (os runners do GitHub saem pela internet comum). É ele que
+responde à pergunta que não dá para responder de dentro do escritório:
+
+> *O POST quebra por causa da nossa rede ou por causa da Vercel?*
+
+- **Rodando no GitHub, o POST funciona** → quem altera a requisição é a rede
+  interna (proxy/firewall trocando método, path ou corpo). Leve o resumo ao TI.
+- **Rodando no GitHub, o POST falha igual** → o problema está na API/Vercel.
+
+Como rodar: **Actions → "API POST check (produção)" → Run workflow**. Aceita
+`base_url` (padrão `https://frota-psi.vercel.app`). Opcionalmente marca
+`sonda_completa = true` para criar **e apagar** uma OS de teste, provando o
+caminho completo de escrita no banco — a remoção roda por `trap`, inclusive se
+a etapa falhar no meio. Também há uma execução agendada em dias úteis às 09:00
+de Brasília, que roda **somente** as sondas leituras (`/api/echo`), sem tocar
+no banco.
+
 ## 🔌 API
 
 | Método       | Rota                | Descrição                      |
 |--------------|---------------------|--------------------------------|
 | GET          | `/api/status`       | Status + banco em uso (neon/file) |
+| GET          | `/api/echo`         | **Espelho da rede**: devolve o que a função recebeu (path, método, host, query, corpo e cabeçalhos de proxy) |
 | GET          | `/api/data`         | Veículos + usuários (sem senha)|
 | POST         | `/api/login`        | Login `{usuario, senha}`       |
 | POST         | `/api/seed`         | Recria os 29 veículos iniciais |
@@ -124,6 +163,34 @@ Acesse `http://localhost:8080` — login: **admin / admin2025**
 > entra na fila offline em vez de falhar sem explicação. O navegador aguarda cada
 > chamada por até 30s. A API nunca devolve HTML: até falhas fora do fluxo normal
 > viram JSON 500.
+>
+> 🪞 **Espelho da rede — `GET /api/echo` (v3.8.1)**: quando a suspeita é que a
+> *rede* altera a requisição no caminho, este endpoint devolve exatamente o que
+> a **função** recebeu: `metodo`, `path`, `query`, `host`, `x-forwarded-*`,
+> `via`, o corpo recebido e a plataforma (deploy/região/banco). Comparar com o
+> que o navegador enviou revela, em um JSON, **quem mudou o quê**:
+>
+> | Sintoma no `/api/echo` | O que significa |
+> |---|---|
+> | `"metodo": "GET"` num POST | um intermediário trocou o método e perdeu o corpo |
+> | `path` diferente do pedido | proxy/firewall reescrevendo a URL |
+> | `Host` ≠ `X-Forwarded-Host` | proxy transparente no caminho |
+> | `content_length_anunciado` > `content_length_recebido` | rede truncando o corpo |
+> | POST sem `Content-Length` | rede removendo o payload |
+> | sem `x-vercel-id` | a resposta **não** passou pela Vercel |
+>
+> Aceita qualquer método de propósito (para flagrar troca de POST→GET), nunca
+> ecoa credenciais (`cookie`/`authorization` saem como `***omitido***`) e
+> responde sempre — mesmo que o corpo anunciado nunca chegue, devolve o aviso
+> em vez de deixar a requisição pendurada.
+>
+> 🔎 **`x-vercel-id` nos erros (v3.8.1)**: toda resposta que passa pela Vercel
+> carrega `x-vercel-id` (região + deploy). Quando a resposta de erro **não**
+> vem da API, a mensagem agora informa isso: mostra `[x-vercel-id: gru1::...]`
+> se passou pela plataforma, ou `[sem x-vercel-id] — a resposta NÃO veio da API
+> na Vercel: veio de proxy, firewall, cache ou página da plataforma.` quando não
+> passou. É o que separa "a função falhou" de "alguém no caminho respondeu no
+> lugar da função".
 >
 > 🛡️ **Anti-cache (v3.8)**: respostas velhas presas em cache (CDN, proxy
 > corporativo, navegador) faziam um lançamento "sumir" ou devolviam 404 antigo.
