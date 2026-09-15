@@ -1,13 +1,18 @@
 'use strict';
 
 // ============================================================
-// FROTA PRO v3.6 — Controle de Frota (grupos S2, S3 e S4)
+// FROTA PRO v3.8 — Controle de Frota (grupos S2, S3 e S4)
 // Servidor Node nativo: API REST + arquivos estáticos.
 //
 // Persistência:
 //  • DATABASE_URL definida  → Neon (Postgres) — produção/Vercel
 //  • DATABASE_URL ausente   → data/db.json (modo local/dev)
 // Tabelas criadas automaticamente + seed na primeira chamada.
+//
+// v3.8 — anti-cache da API: toda resposta JSON sai com
+// Cache-Control: no-store para nenhuma camada intermediária
+// (CDN/proxy/browser) servir resposta velha da API. O front
+// ainda acrescenta ?_t=<timestamp> em cada chamada.
 // ============================================================
 
 const http = require('http');
@@ -21,7 +26,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.7';
+const VERSION = '3.8';
 
 // Tempo máximo de UMA ida ao banco. O driver da Neon fala por HTTP (cada query =
 // 1 fetch) e não tem timeout próprio: com o banco suspenso/lento, a função ficava
@@ -827,8 +832,17 @@ function stripSenha(u) { if (!u) return u; const { senha, ...pub } = u; return p
 // HTTP
 // ============================================================
 
+// v3.8 — toda resposta da API proíbe cache explicitamente: intermediários
+// (Vercel Edge, proxies corporativos, navegador) não podem servir uma
+// resposta antiga no lugar da atual. É isso que impede o "salvou mas não
+// aparece" causado por 200/404 velhos presos em cache.
 function json(res, code, data) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+  res.writeHead(code, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Pragma': 'no-cache',
+    'Access-Control-Allow-Origin': '*'
+  });
   res.end(JSON.stringify(data));
 }
 function invalidJsonError() {
@@ -929,7 +943,7 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': '
 async function handleRequest(req, res) {
   req._t0 = Date.now();
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Cache-Control': 'no-store' });
     return res.end();
   }
   const requestUrl = new URL(req.url, `http://${req.headers.host}`);

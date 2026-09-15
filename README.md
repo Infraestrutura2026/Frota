@@ -124,3 +124,13 @@ Acesse `http://localhost:8080` — login: **admin / admin2025**
 > entra na fila offline em vez de falhar sem explicação. O navegador aguarda cada
 > chamada por até 30s. A API nunca devolve HTML: até falhas fora do fluxo normal
 > viram JSON 500.
+>
+> 🛡️ **Anti-cache (v3.8)**: respostas velhas presas em cache (CDN, proxy
+> corporativo, navegador) faziam um lançamento "sumir" ou devolviam 404 antigo.
+> Agora a API é blindada em três camadas: (1) toda resposta JSON sai com
+> `Cache-Control: no-store`; (2) toda chamada do front leva `?_t=<timestamp>`,
+> tornando cada URL única; (3) se um `POST /api/manutencoes` recebe 404 **fora
+> da API** (resposta não-JSON, típica de página de erro/proxy/cache), o front
+> repete automaticamente no alias `/api/manutencao`. Além disso, todo erro da
+> API mostra a tag `[cache HIT]` / `[cache MISS]` — HIT indica que a resposta
+> veio de uma camada de cache, MISS que veio direto da origem.
