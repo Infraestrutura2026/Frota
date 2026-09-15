@@ -1,7 +1,7 @@
 'use strict';
 
 // ============================================================
-// FROTA PRO v3.8.1 — Controle de Frota (grupos S2, S3 e S4)
+// FROTA PRO v3.8.2 — Controle de Frota (grupos S2, S3 e S4)
 // Servidor Node nativo: API REST + arquivos estáticos.
 //
 // Persistência:
@@ -20,6 +20,17 @@
 // que troca POST por GET, reescreve o path, troca o Host, come o corpo
 // ou injeta cabeçalhos. Se /api/echo não responder JSON da API, a
 // resposta está vindo de outra coisa (proxy, cache, firewall).
+//
+// v3.8.2 — correção de segurança no GET /api/echo: o endpoint é público
+// (não pede login) e estava ecoando as credenciais que a própria Vercel
+// injeta na requisição — `x-vercel-oidc-token` (JWT que autentica o
+// projeto, validade de 2h), `x-vercel-proxy-signature` (Bearer) e a
+// assinatura `sig=` dentro de `forwarded`. Qualquer pessoa que abrisse a
+// URL levava a credencial do projeto. Agora: lista de redação ampliada,
+// redação também pelo NOME do cabeçalho (token/signature/secret/senha…),
+// `sig=` trocada dentro de `forwarded`, dump completo dos cabeçalhos só
+// com `?completo=1` e a lista `campos_omitidos` para que omissão não seja
+// confundida com ausência do cabeçalho.
 // ============================================================
 
 const http = require('http');
@@ -33,7 +44,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.8.1';
+const VERSION = '3.8.2';
 
 // Tempo máximo de UMA ida ao banco. O driver da Neon fala por HTTP (cada query =
 // 1 fetch) e não tem timeout próprio: com o banco suspenso/lento, a função ficava
@@ -876,8 +887,53 @@ function invalidJsonError() {
 // vazamento de sessão.
 const ECHO_REDACT = new Set([
   'cookie', 'set-cookie', 'authorization', 'proxy-authorization',
-  'x-api-key', 'x-auth-token', 'x-vercel-signature', 'x-csrf-token'
+  'x-api-key', 'x-auth-token', 'x-vercel-signature', 'x-csrf-token',
+  // v3.8.2 — credenciais injetadas pela própria Vercel na requisição:
+  // o OIDC é um JWT que autentica o PROJETO (validade de 2h) e a
+  // proxy-signature é um Bearer da plataforma. Ecoá-los em endpoint
+  // público equivale a publicar a credencial do projeto.
+  'x-vercel-oidc-token', 'x-vercel-proxy-signature', 'x-vercel-proxy-signature-ts'
 ]);
+
+// Rede de segurança para nomes que ainda não existem: qualquer cabeçalho cujo
+// NOME cheire a credencial é redigido, mesmo fora da lista acima.
+const ECHO_REDACT_NAME = /(token|signature|secret|password|passwd|api-?key|chave|senha|assertion|bearer|credential)/i;
+
+const ECHO_REDACTED = '***omitido***';
+
+function echoDeveRedigir(name) {
+  const lower = String(name).toLowerCase();
+  return ECHO_REDACT.has(lower) || ECHO_REDACT_NAME.test(lower);
+}
+
+// `forwarded` (RFC 7239) carrega dados úteis de diagnóstico (for=, host=,
+// proto=) junto com a assinatura `sig=` da Vercel. Preserva o que ajuda e
+// omite só a assinatura.
+function echoSanitizarForwarded(value) {
+  const troca = (v) => String(v).replace(/(\bsig\s*=\s*)("[^"]*"|[^;,\s]+)/gi, `$1${ECHO_REDACTED}`);
+  return Array.isArray(value) ? value.map(troca) : troca(value);
+}
+
+// Redige um conjunto de cabeçalhos, devolvendo também os nomes suprimidos —
+// para que "omitido" nunca seja confundido com "o cabeçalho não veio".
+function echoRedigir(headers) {
+  const saida = {};
+  const omitidos = [];
+  for (const name of Object.keys(headers)) {
+    const lower = name.toLowerCase();
+    if (echoDeveRedigir(lower)) {
+      saida[name] = ECHO_REDACTED;
+      omitidos.push(lower);
+    } else if (lower === 'forwarded') {
+      const limpo = echoSanitizarForwarded(headers[name]);
+      saida[name] = limpo;
+      if (String(limpo) !== String(headers[name])) omitidos.push('forwarded.sig');
+    } else {
+      saida[name] = headers[name];
+    }
+  }
+  return { headers: saida, omitidos };
+}
 
 // Teto para ler o corpo no /api/echo (ver comentário em echoDiagnostics).
 const ECHO_BODY_TIMEOUT_MS = 5000;
@@ -895,10 +951,21 @@ async function echoDiagnostics(req, requestUrl) {
     }
   }
 
-  const allHeaders = {};
-  for (const name of Object.keys(h)) {
-    allHeaders[name] = ECHO_REDACT.has(name.toLowerCase()) ? '***omitido***' : h[name];
-  }
+  // A redação vale para os DOIS blocos: o OIDC começa com `x-vercel-`, logo
+  // também cai em `cabecalhos_de_proxy`.
+  const proxyRedigido = echoRedigir(proxyHeaders);
+  const todosRedigido = echoRedigir(h);
+
+  // O dump completo dos cabeçalhos passa a ser opcional: por padrão só os de
+  // proxy (já redigidos) aparecem; o resto exige ?completo=1.
+  const completo = ['1', 'true', 'sim', 'yes'].includes(
+    String(requestUrl.searchParams.get('completo') || '').toLowerCase()
+  );
+  const allHeaders = completo
+    ? todosRedigido.headers
+    : '(omitido — acrescente ?completo=1 à URL para ver todos)';
+
+  const camposOmitidos = Array.from(new Set([...proxyRedigido.omitidos, ...todosRedigido.omitidos])).sort();
 
   // Corpo: só faz sentido ler quando há corpo. Se a rede comeu o corpo, o
   // Content-Length anunciado não bate com o que chegou — e isso aparece aqui.
@@ -983,8 +1050,10 @@ async function echoDiagnostics(req, requestUrl) {
       x_forwarded_for: get('x-forwarded-for'),
       x_real_ip: get('x-real-ip')
     },
-    cabecalhos_de_proxy: proxyHeaders,
+    cabecalhos_de_proxy: proxyRedigido.headers,
     cabecalhos: allHeaders,
+    cabecalhos_completos: completo,
+    campos_omitidos: camposOmitidos,
     corpo: {
       content_length_anunciado: declaredLength === null ? null : Number(declaredLength),
       content_length_recebido: arrivedLength,
