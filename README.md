@@ -128,7 +128,7 @@ no banco.
 | Método       | Rota                | Descrição                      |
 |--------------|---------------------|--------------------------------|
 | GET          | `/api/status`       | Status + banco em uso (neon/file) |
-| GET          | `/api/echo`         | **Espelho da rede**: devolve o que a função recebeu (path, método, host, query, corpo e cabeçalhos de proxy) |
+| GET          | `/api/echo`         | **Espelho da rede**: devolve o que a função recebeu (path, método, host, query, corpo e cabeçalhos de proxy). `?completo=1` inclui o dump de **todos** os cabeçalhos — sempre sem credenciais |
 | GET          | `/api/data`         | Veículos + usuários (sem senha)|
 | POST         | `/api/login`        | Login `{usuario, senha}`       |
 | POST         | `/api/seed`         | Recria os 29 veículos iniciais |
@@ -164,7 +164,7 @@ no banco.
 > chamada por até 30s. A API nunca devolve HTML: até falhas fora do fluxo normal
 > viram JSON 500.
 >
-> 🪞 **Espelho da rede — `GET /api/echo` (v3.8.1)**: quando a suspeita é que a
+> 🪞 **Espelho da rede — `GET /api/echo` (v3.8.1 / v3.8.2)**: quando a suspeita é que a
 > *rede* altera a requisição no caminho, este endpoint devolve exatamente o que
 > a **função** recebeu: `metodo`, `path`, `query`, `host`, `x-forwarded-*`,
 > `via`, o corpo recebido e a plataforma (deploy/região/banco). Comparar com o
@@ -179,10 +179,31 @@ no banco.
 > | POST sem `Content-Length` | rede removendo o payload |
 > | sem `x-vercel-id` | a resposta **não** passou pela Vercel |
 >
-> Aceita qualquer método de propósito (para flagrar troca de POST→GET), nunca
-> ecoa credenciais (`cookie`/`authorization` saem como `***omitido***`) e
+> Aceita qualquer método de propósito (para flagrar troca de POST→GET) e
 > responde sempre — mesmo que o corpo anunciado nunca chegue, devolve o aviso
 > em vez de deixar a requisição pendurada.
+>
+> 🔐 **Credenciais nunca são ecoadas (v3.8.2)**: o `/api/echo` é público (não
+> pede login), então nada que autentique alguém pode sair nele. Saem como
+> `***omitido***`: `cookie`, `authorization`, `proxy-authorization` e as
+> credenciais que a **própria Vercel injeta** na requisição —
+> `x-vercel-oidc-token` (JWT que autentica o projeto, validade de 2h),
+> `x-vercel-proxy-signature` e `x-vercel-proxy-signature-ts`. Além da lista
+> fixa, qualquer cabeçalho cujo **nome** contenha `token`, `signature`,
+> `secret`, `password`/`passwd`, `api-key`, `chave`, `senha`, `assertion`,
+> `bearer` ou `credential` é redigido automaticamente, o que cobre nomes novos
+> que apareçam no futuro. No `forwarded`, só a assinatura é trocada
+> (`sig=***omitido***`) — `for=`, `host=` e `proto=` continuam visíveis. A
+> redação vale para `cabecalhos_de_proxy` **e** `cabecalhos`.
+>
+> 🧾 **Dump completo é opcional (v3.8.2)**: por padrão o campo `cabecalhos`
+> vem como `"(omitido — acrescente ?completo=1 à URL para ver todos)"` e só o
+> bloco `cabecalhos_de_proxy` (já redigido) aparece. Para ver todos os
+> cabeçalhos, abra `/api/echo?completo=1` — as credenciais continuam
+> omitidas mesmo assim. O campo `campos_omitidos` lista os nomes suprimidos,
+> para que omissão não seja confundida com **ausência** do cabeçalho. Seguem
+> visíveis os campos úteis ao diagnóstico: `x-vercel-id`, `x-forwarded-*`,
+> `x-real-ip`, `x-vercel-ip-city` e `x-vercel-ja4-digest`.
 >
 > 🔎 **`x-vercel-id` nos erros (v3.8.1)**: toda resposta que passa pela Vercel
 > carrega `x-vercel-id` (região + deploy). Quando a resposta de erro **não**
