@@ -212,23 +212,58 @@ const App = (function() {
   }
 
   // ---------- API ----------
+  const API_TIMEOUT_MS = 30000;
+
+  // Quando o erro NÃO vem como JSON da API (página HTML da plataforma, bloqueio
+  // de proxy/firewall, timeout do gateway...), mostra o status HTTP + um trecho
+  // da resposta, em vez do críptico "Erro na API" que não dizia nada.
+  function apiErrorMessage(status, rawText){
+    const clean=String(rawText||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().slice(0,180);
+    let msg=`Erro na API (HTTP ${status})`;
+    if(clean) msg+=` — ${clean}`;
+    if(status===504||/timeout|tempo esgotado|timed out/i.test(clean)) msg+='. Tempo esgotado: tente novamente.';
+    else if(status===413) msg+='. Dados grandes demais para enviar.';
+    else if(status===401&&/sso|log\s?in|sign\s?in|vercel|expir/i.test(clean)) msg+='. Sessão expirada — recarregue a página e entre novamente.';
+    else if(status===401||status===403||/bloquead|blocked|forbidden|negad|denied|proxy|firewall|acesso restrito|unauthor/i.test(clean)) msg+='. Pode ser bloqueio da rede/proxy — fale com o TI.';
+    return msg;
+  }
+
   async function api(path, opts){
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(), API_TIMEOUT_MS);
     let r;
     try{
-      r=await fetch('/api'+path, opts);
+      r=await fetch('/api'+path, { ...(opts||{}), signal: ctrl.signal });
     }catch(err){
+      clearTimeout(timer);
+      if(err && err.name==='AbortError'){
+        const t=new Error('Tempo esgotado na comunicação com o servidor (30s). Tente novamente.');
+        t.offline=true; t.status=0; // entra na fila e sincroniza depois
+        throw t;
+      }
       err.offline=true; // falha de rede/fetch: API fora do ar
       throw err;
     }
+    clearTimeout(timer);
     if(!r.ok){
-      let msg='Erro na API'; try{msg=(await r.json()).error||msg;}catch{}
+      let raw=''; try{ raw=await r.text(); }catch{}
+      let msg=null; try{ msg=(JSON.parse(raw)||{}).error||null; }catch{}
+      if(!msg) msg=apiErrorMessage(r.status, raw);
       const e=new Error(msg);
       e.status=r.status;
       if(r.status===502||r.status===503||r.status===504) e.offline=true; // gateway indisponível
+      else { online=true; setConnStatus(true); } // o servidor RESPONDEU: está alcançável
+      try{ console.error('[API]', r.status, path, String(raw||'').slice(0,500)); }catch{}
       throw e;
     }
     online=true; setConnStatus(true);
-    return r.json();
+    try{
+      return await r.json();
+    }catch(err){
+      const e=new Error(apiErrorMessage(r.status,'resposta inválida do servidor'));
+      e.status=r.status;
+      throw e;
+    }
   }
   function isOfflineError(e){ return !!(e&&(e.offline===true||e.status===502||e.status===503||e.status===504)); }
 
@@ -239,7 +274,9 @@ const App = (function() {
       vehicles=fromServer;
       online=true; saveCache(); setConnStatus(true);
     }catch(e){
-      online=false; setConnStatus(false); loadCache();
+      if(isOfflineError(e)){ online=false; setConnStatus(false); }
+      else { try{ console.error('[sync] /vehicles:', e.message); }catch{} }
+      loadCache();
       return;
     }
     // Registros salvos offline (id de timestamp ou _pending) que ainda não estão no servidor:
