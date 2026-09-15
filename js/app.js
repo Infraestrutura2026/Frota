@@ -214,6 +214,31 @@ const App = (function() {
   // ---------- API ----------
   const API_TIMEOUT_MS = 30000;
 
+  // v3.8 — anti-cache, camada do navegador: TODA chamada à API leva um
+  // parâmetro _t=<timestamp>, tornando cada URL única para que nenhum cache
+  // intermediário (proxy corporativo, CDN, service worker de terceiro) consiga
+  // servir uma resposta antiga. O servidor, por sua vez, responde
+  // Cache-Control: no-store (v3.8 no server.js).
+  function withCacheBust(url){
+    return url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+  }
+
+  // v3.8 — diagnóstico de cache: descobre se a resposta veio de uma camada de
+  // cache (HIT) ou direto da origem (MISS). A Vercel expõe x-vercel-cache;
+  // proxies/CDNs podem usar cf-cache-status, x-cache ou age. A tag vai em
+  // todos os erros da API para dar visibilidade a respostas velhas em cache.
+  function cacheTag(r){
+    try{
+      const h=r.headers;
+      const vc=String(h.get('x-vercel-cache')||'').toUpperCase();
+      const cf=String(h.get('cf-cache-status')||'').toUpperCase();
+      const xc=String(h.get('x-cache')||'').toUpperCase();
+      const age=parseInt(h.get('age')||'0',10)||0;
+      const hit=(vc==='HIT'||vc==='STALE'||cf==='HIT'||vc==='REVALIDATE'||/HIT/.test(xc)||age>5);
+      return '[cache '+(hit?'HIT':'MISS')+']';
+    }catch(_){ return '[cache ?]'; }
+  }
+
   // Quando o erro NÃO vem como JSON da API (página HTML da plataforma, bloqueio
   // de proxy/firewall, timeout do gateway...), mostra o status HTTP + um trecho
   // da resposta, em vez do críptico "Erro na API" que não dizia nada.
@@ -231,9 +256,25 @@ const App = (function() {
   async function api(path, opts){
     const ctrl=new AbortController();
     const timer=setTimeout(()=>ctrl.abort(), API_TIMEOUT_MS);
+    let finalPath=path;
     let r;
     try{
-      r=await fetch('/api'+path, { ...(opts||{}), signal: ctrl.signal });
+      r=await fetch(withCacheBust('/api'+path), { ...(opts||{}), signal: ctrl.signal });
+      // v3.8 — rota alternativa automática: se um POST em /manutencoes recebe
+      // 404 que NÃO veio da nossa API (a API responde 404 com JSON
+      // {"error":"Not found"}; resposta fora de JSON é página da plataforma,
+      // proxy ou 404 velho preso em cache), tenta de novo uma única vez no
+      // alias /api/manutencao, que o servidor também atende.
+      if(r.status===404 && String((opts&&opts.method)||'GET').toUpperCase()==='POST'
+        && (path==='/manutencoes' || path.indexOf('/manutencoes?')===0)){
+        const ct=String((r.headers&&r.headers.get('content-type'))||'');
+        if(!/application\/json/i.test(ct)){
+          try{ console.warn('[API] POST', path, '404 fora da API', cacheTag(r), '→ tentando rota alternativa /api/manutencao'); }catch{}
+          try{ if(r.body&&r.body.cancel) r.body.cancel(); }catch{}
+          finalPath='/manutencao';
+          r=await fetch(withCacheBust('/api/manutencao'), { ...(opts||{}), signal: ctrl.signal });
+        }
+      }
     }catch(err){
       clearTimeout(timer);
       if(err && err.name==='AbortError'){
@@ -245,22 +286,24 @@ const App = (function() {
       throw err;
     }
     clearTimeout(timer);
+    const tag=cacheTag(r);
     if(!r.ok){
       let raw=''; try{ raw=await r.text(); }catch{}
       let msg=null; try{ msg=(JSON.parse(raw)||{}).error||null; }catch{}
       if(!msg) msg=apiErrorMessage(r.status, raw);
+      msg+=' '+tag; // visibilidade: veio do cache (HIT) ou da origem (MISS)?
       const e=new Error(msg);
       e.status=r.status;
       if(r.status===502||r.status===503||r.status===504) e.offline=true; // gateway indisponível
       else { online=true; setConnStatus(true); } // o servidor RESPONDEU: está alcançável
-      try{ console.error('[API]', r.status, path, String(raw||'').slice(0,500)); }catch{}
+      try{ console.error('[API]', r.status, finalPath, tag, String(raw||'').slice(0,500)); }catch{}
       throw e;
     }
     online=true; setConnStatus(true);
     try{
       return await r.json();
     }catch(err){
-      const e=new Error(apiErrorMessage(r.status,'resposta inválida do servidor'));
+      const e=new Error(apiErrorMessage(r.status,'resposta inválida do servidor')+' '+tag);
       e.status=r.status;
       throw e;
     }
