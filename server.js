@@ -21,7 +21,14 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.6';
+const VERSION = '3.7';
+
+// Tempo máximo de UMA ida ao banco. O driver da Neon fala por HTTP (cada query =
+// 1 fetch) e não tem timeout próprio: com o banco suspenso/lento, a função ficava
+// pendurada até a Vercel matá-la e devolver uma página HTML de erro — que o front
+// mostrava como o críptico "Erro na API", sem dizer nada. Com o limite, a API
+// responde JSON 504 e o app enfileira o registro para sincronizar depois.
+const NEON_QUERY_TIMEOUT_MS = 20000;
 
 // Hash legado mantido para compatibilidade com bancos antigos.
 const LEGACY_ADMIN_HASH = 'e6c2797fed87dd7a39f60bcfe65cf34645229671607ef506720d20d41f173b2a';
@@ -81,7 +88,24 @@ function nextId(arr) { return arr.reduce((m, x) => Math.max(m, Number(x.id) || 0
 
 let sql = null;
 if (DATABASE_URL) {
-  const { neon } = require('@neondatabase/serverless');
+  const { neon, neonConfig } = require('@neondatabase/serverless');
+  const baseFetch = neonConfig.fetchFunction || fetch;
+  neonConfig.fetchFunction = async (url, opts) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), NEON_QUERY_TIMEOUT_MS);
+    try {
+      return await baseFetch(url, { ...(opts || {}), signal: ctrl.signal });
+    } catch (e) {
+      if (e && (e.name === 'AbortError' || /abort/i.test(String((e && e.message) || e)))) {
+        const err = new Error('Tempo esgotado ao falar com o banco de dados. Tente novamente.');
+        err.statusCode = 504;
+        throw err;
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   sql = neon(DATABASE_URL);
 }
 
@@ -128,79 +152,87 @@ const MANUT_HEAL = `ALTER TABLE manutencoes
 async function ensureNeon() {
   if (!neonInitPromise) {
     neonInitPromise = (async () => {
-      // 1) Estrutura. Cada statement é independente: uma falha pontual de ajuste (heal)
-      //    não pode derrubar a API inteira — era isso que fazia TODO salvamento de
-      //    manutenção voltar 500 quando o banco tinha sido criado por uma versão
-      //    anterior do app (CREATE TABLE IF NOT EXISTS nunca acrescenta colunas).
-      await sql`CREATE TABLE IF NOT EXISTS vehicles (
-        id INTEGER PRIMARY KEY,
-        placa TEXT, grupo TEXT, marca TEXT, modelo TEXT,
-        ano INTEGER, cor TEXT, hodometro INTEGER,
-        status TEXT, combustivel TEXT, capacidade INTEGER,
-        created_at TIMESTAMPTZ DEFAULT now()
-      )`;
-      await sql`CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY,
-        nome TEXT, usuario TEXT, senha TEXT, role TEXT, ativo INTEGER
-      )`;
-      // O módulo de Troca de Óleo é auto-inicializável. Os ALTER abaixo cobrem
-      // bancos Neon criados por uma versão anterior do módulo.
-      await sql`CREATE TABLE IF NOT EXISTS oil_changes (
-        id INTEGER PRIMARY KEY,
-        vehicle_id INTEGER,
-        veiculo_id INTEGER,
-        placa TEXT,
-        data DATE,
-        data_troca DATE,
-        tipo_oleo TEXT,
-        oleo TEXT,
-        quantidade NUMERIC,
-        hodometro INTEGER,
-        horimetro INTEGER,
-        observacoes TEXT,
-        created_at TIMESTAMPTZ DEFAULT now()
-      )`;
-      // Módulo Manutenção (ordens de serviço) — a Troca de Óleo é um tipo.
-      await sql.query(MANUT_SCHEMA);
-      await sql`CREATE TABLE IF NOT EXISTS meta (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      )`;
+      // 1) Estrutura. Os statements são independentes entre si e rodam em PARALELO:
+      //    numa função serverless fria, cada await é uma viagem HTTP até o Neon
+      //    (~100–300 ms cada, mais a retomada do banco suspenso). Em série, o cold
+      //    start somava segundos e estourava o tempo máximo da função bem na hora de
+      //    salvar — a Vercel matava a execução e devolvia HTML em vez de JSON.
+      await Promise.all([
+        sql`CREATE TABLE IF NOT EXISTS vehicles (
+          id INTEGER PRIMARY KEY,
+          placa TEXT, grupo TEXT, marca TEXT, modelo TEXT,
+          ano INTEGER, cor TEXT, hodometro INTEGER,
+          status TEXT, combustivel TEXT, capacidade INTEGER,
+          created_at TIMESTAMPTZ DEFAULT now()
+        )`,
+        sql`CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY,
+          nome TEXT, usuario TEXT, senha TEXT, role TEXT, ativo INTEGER
+        )`,
+        // O módulo de Troca de Óleo é auto-inicializável. Os ALTER abaixo cobrem
+        // bancos Neon criados por uma versão anterior do módulo.
+        sql`CREATE TABLE IF NOT EXISTS oil_changes (
+          id INTEGER PRIMARY KEY,
+          vehicle_id INTEGER,
+          veiculo_id INTEGER,
+          placa TEXT,
+          data DATE,
+          data_troca DATE,
+          tipo_oleo TEXT,
+          oleo TEXT,
+          quantidade NUMERIC,
+          hodometro INTEGER,
+          horimetro INTEGER,
+          observacoes TEXT,
+          created_at TIMESTAMPTZ DEFAULT now()
+        )`,
+        // Módulo Manutenção (ordens de serviço) — a Troca de Óleo é um tipo.
+        sql.query(MANUT_SCHEMA),
+        sql`CREATE TABLE IF NOT EXISTS meta (
+          key TEXT PRIMARY KEY,
+          value TEXT
+        )`
+      ]);
 
       // 2) Auto-cura da estrutura: acrescenta colunas que faltarem em bancos antigos.
-      for (const heal of [
+      //    Cada ajuste é isolado: uma falha pontual não derruba a API inteira.
+      await Promise.all([
         `ALTER TABLE oil_changes ADD COLUMN IF NOT EXISTS horimetro INTEGER`,
         MANUT_HEAL
-      ]) {
-        try {
-          await sql.query(heal);
-        } catch (e) {
+      ].map((heal) =>
+        sql.query(heal).catch((e) => {
           console.error('[API] Ajuste de estrutura ignorado:', reasonDaFalha(e));
-        }
-      }
+        })
+      ));
 
       // 3) Passos que NÃO podem impedir o salvamento: migração antiga e carga inicial.
-      try {
-        const migrated = await sql`SELECT value FROM meta WHERE key = 'oil_migrated'`;
-        if (migrated.length === 0) {
-          await sql`INSERT INTO manutencoes
-            (id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at)
-            SELECT id, COALESCE(vehicle_id, veiculo_id), COALESCE(vehicle_id, veiculo_id), placa,
-              'TROCA DE ÓLEO', COALESCE(data, data_troca), NULL, hodometro, NULL,
-              'Troca de óleo', NULL, NULL, NULL, 'CONCLUÍDA',
-              COALESCE(tipo_oleo, oleo), quantidade, observacoes, created_at
-            FROM oil_changes ON CONFLICT (id) DO NOTHING`;
-          await sql`INSERT INTO meta (key, value) VALUES ('oil_migrated', '1') ON CONFLICT (key) DO NOTHING`;
+      //    São independentes (tabelas distintas) e rodam em paralelo, cada um com
+      //    seu próprio isolamento de falha.
+      const migrateOil = (async () => {
+        try {
+          const migrated = await sql`SELECT value FROM meta WHERE key = 'oil_migrated'`;
+          if (migrated.length === 0) {
+            await sql`INSERT INTO manutencoes
+              (id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at)
+              SELECT id, COALESCE(vehicle_id, veiculo_id), COALESCE(vehicle_id, veiculo_id), placa,
+                'TROCA DE ÓLEO', COALESCE(data, data_troca), NULL, hodometro, NULL,
+                'Troca de óleo', NULL, NULL, NULL, 'CONCLUÍDA',
+                COALESCE(tipo_oleo, oleo), quantidade, observacoes, created_at
+              FROM oil_changes ON CONFLICT (id) DO NOTHING`;
+            await sql`INSERT INTO meta (key, value) VALUES ('oil_migrated', '1') ON CONFLICT (key) DO NOTHING`;
+          }
+        } catch (e) {
+          console.error('[API] Migração oil_changes → manutencoes ignorada:', reasonDaFalha(e));
         }
-      } catch (e) {
-        console.error('[API] Migração oil_changes → manutencoes ignorada:', reasonDaFalha(e));
-      }
-
-      try {
-        await seedNeonIfEmpty();
-      } catch (e) {
-        console.error('[API] Seed inicial ignorado:', reasonDaFalha(e));
-      }
+      })();
+      const seedInitial = (async () => {
+        try {
+          await seedNeonIfEmpty();
+        } catch (e) {
+          console.error('[API] Seed inicial ignorado:', reasonDaFalha(e));
+        }
+      })();
+      await Promise.all([migrateOil, seedInitial]);
     })().catch((e) => { neonInitPromise = null; throw e; });
   }
   return neonInitPromise;
@@ -209,25 +241,30 @@ async function ensureNeon() {
 // Carga inicial (29 veículos + admin) apenas quando o banco está vazio.
 // Feita em uma única instrução por tabela, com ON CONFLICT para repetir sem dano.
 async function seedNeonIfEmpty() {
-  const vc = await sql`SELECT COUNT(*)::int AS n FROM vehicles`;
+  // Contagens independentes rodam juntas (1 viagem em vez de 2 no cold start).
+  const [vc, uc] = await Promise.all([
+    sql`SELECT COUNT(*)::int AS n FROM vehicles`,
+    sql`SELECT COUNT(*)::int AS n FROM users`
+  ]);
+  const jobs = [];
   if (Number(vc[0] && vc[0].n) === 0) {
-    await sql`INSERT INTO vehicles (id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade)
+    jobs.push(sql`INSERT INTO vehicles (id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade)
       SELECT * FROM unnest(${INITIAL_VEHICLES.map((v) => v.id)}::int[], ${INITIAL_VEHICLES.map((v) => v.placa)}::text[],
         ${INITIAL_VEHICLES.map((v) => v.grupo)}::text[], ${INITIAL_VEHICLES.map((v) => v.marca)}::text[],
         ${INITIAL_VEHICLES.map((v) => v.modelo)}::text[], ${INITIAL_VEHICLES.map((v) => v.ano)}::int[],
         ${INITIAL_VEHICLES.map((v) => v.cor)}::text[], ${INITIAL_VEHICLES.map((v) => v.hodometro)}::int[],
         ${INITIAL_VEHICLES.map((v) => v.status)}::text[], ${INITIAL_VEHICLES.map((v) => v.combustivel)}::text[],
         ${INITIAL_VEHICLES.map((v) => v.capacidade)}::int[])
-      ON CONFLICT (id) DO NOTHING`;
+      ON CONFLICT (id) DO NOTHING`);
   }
-  const uc = await sql`SELECT COUNT(*)::int AS n FROM users`;
   if (Number(uc[0] && uc[0].n) === 0) {
-    await sql`INSERT INTO users (id, nome, usuario, senha, role, ativo)
+    jobs.push(sql`INSERT INTO users (id, nome, usuario, senha, role, ativo)
       SELECT * FROM unnest(${INITIAL_USERS.map((u) => u.id)}::int[], ${INITIAL_USERS.map((u) => u.nome)}::text[],
         ${INITIAL_USERS.map((u) => u.usuario)}::text[], ${INITIAL_USERS.map((u) => u.senha)}::text[],
         ${INITIAL_USERS.map((u) => u.role)}::text[], ${INITIAL_USERS.map((u) => u.ativo)}::int[])
-      ON CONFLICT (id) DO NOTHING`;
+      ON CONFLICT (id) DO NOTHING`);
   }
+  await Promise.all(jobs);
 }
 
 // ---------- Modo arquivo (data/db.json) ----------
@@ -324,7 +361,7 @@ function isUniqueViolation(e) {
   return code === '23505' || /duplicate key value/i.test(reasonDaFalha(e));
 }
 
-async function retryDuplicateKey(fn, tentativas = 5) {
+async function retryDuplicateKey(fn, tentativas = 8) {
   let lastError;
   for (let i = 0; i < tentativas; i++) {
     try {
@@ -332,7 +369,12 @@ async function retryDuplicateKey(fn, tentativas = 5) {
     } catch (e) {
       lastError = e;
       if (!isUniqueViolation(e)) throw e;
-      await new Promise((r) => setTimeout(r, 40 * (i + 1)));
+      // Espera com jitter: com pausas determinísticas, salvamentos simultâneos de
+      // computadores diferentes repetem a colisão em lockstep (todos recalculam o
+      // mesmo MAX(id)+1 e tentam o mesmo id de novo ao mesmo tempo). A
+      // aleatoriedade dessincroniza as tentativas e resolve o conflito.
+      const espera = 50 * (i + 1) + Math.floor(Math.random() * 120);
+      await new Promise((r) => setTimeout(r, espera));
     }
   }
   throw lastError;
@@ -789,13 +831,42 @@ function json(res, code, data) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
   res.end(JSON.stringify(data));
 }
+function invalidJsonError() {
+  const err = new Error('JSON inválido no corpo da requisição.');
+  err.statusCode = 400;
+  return err;
+}
+
 function parseBody(req) {
+  // Na Vercel, o runtime lê o corpo antes de chamar a função e o expõe em
+  // req.body (getter preguiçoso: o acesso pode lançar se o JSON for inválido).
+  // Aceitar as duas formas — corpo já parseado ou stream — garante o salvamento
+  // igual no ambiente local e na nuvem.
+  let preParsed;
+  let hasPreParsed = false;
+  try {
+    if (req.body !== undefined && req.body !== null) { preParsed = req.body; hasPreParsed = true; }
+  } catch (e) {
+    return Promise.reject(invalidJsonError());
+  }
+  if (hasPreParsed) {
+    if (typeof preParsed === 'object' && !Buffer.isBuffer(preParsed)) return Promise.resolve(preParsed);
+    if (typeof preParsed === 'string') {
+      if (!preParsed) return Promise.resolve({});
+      try {
+        return Promise.resolve(JSON.parse(preParsed));
+      } catch (e) {
+        return Promise.reject(invalidJsonError());
+      }
+    }
+    // Buffer ou outro tipo: cai para a leitura da stream abaixo.
+  }
   return new Promise((ok, fail) => {
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
     req.on('end', () => {
       try { ok(body ? JSON.parse(body) : {}); }
-      catch (e) { const err = new Error('JSON inválido no corpo da requisição.'); err.statusCode = 400; fail(err); }
+      catch (e) { fail(invalidJsonError()); }
     });
     req.on('error', fail);
   });
@@ -810,24 +881,53 @@ function reasonDaFalha(e) {
   // junta o que houver (detail/hint/nome) para nunca perder a causa do erro.
   const partes = [e.message, e.detail, e.hint].filter(Boolean).map(String);
   if (!partes.length) partes.push(String(e.name && e.name !== 'Error' ? e.name : (e.stack ? String(e.stack).split('\n')[0] : e)));
-  return partes.join(' — ').replace(/^NeonDbError$/, 'Erro do banco de dados (Neon/Postgres)').slice(0, 400);
+  return partes
+    .join(' — ')
+    .replace(/^NeonDbError$/, 'Erro do banco de dados (Neon/Postgres)')
+    // O driver embrulha falhas de conexão ("Error connecting to database: Error: ...");
+    // tira o embrulho para a mensagem ficar legível no aviso do navegador.
+    .replace(/^Error connecting to database:\s*(Error:\s*)?/i, '')
+    .slice(0, 400);
 }
 
 function apiError(res, req, pathname, e) {
-  const code = e && e.statusCode ? e.statusCode : 500;
+  let code = e && e.statusCode ? e.statusCode : 500;
   const motivo = reasonDaFalha(e) || 'Erro interno no servidor.';
   const sqlstate = String((e && (e.code || e.sqlState)) || '');
-  if (code === 500) {
-    console.error(`[API] ${req.method} ${pathname} → ${motivo}${sqlstate ? ` (sqlstate ${sqlstate})` : ''}`);
-    if (process.env.API_DEBUG === '1') console.error(e);
-    return json(res, 500, { error: `Erro no servidor: ${motivo}`, sqlstate: sqlstate || undefined });
+  const took = req && req._t0 ? ` (${Date.now() - req._t0}ms)` : '';
+  // Falha de CONEXÃO com o banco (timeout dos 20s, Neon suspenso/inacessível) não é
+  // erro de SQL: vira 504 para o front tratar como "API fora do ar" (salva local e
+  // sincroniza depois) em vez de erro genérico.
+  if (code === 500 && /connecting to database|tempo esgotado ao falar com o banco|fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test([e && e.message, motivo].filter(Boolean).join(' '))) {
+    code = 504;
   }
+  if (code >= 500) {
+    console.error(`[API] ${req.method} ${pathname} → ${motivo}${sqlstate ? ` (sqlstate ${sqlstate})` : ''}${took}`);
+    if (process.env.API_DEBUG === '1') console.error(e);
+    return json(res, code, { error: `Erro no servidor: ${motivo}`, sqlstate: sqlstate || undefined });
+  }
+  // 4xx também vão para o log: uma epidemia de "Veículo é obrigatório." sem pista
+  // no log é impossível de diagnosticar à distância.
+  console.warn(`[API] ${req.method} ${pathname} → ${code} ${motivo}${took}`);
   return json(res, code, { error: motivo });
+}
+
+// Última rede de segurança: um erro lançado fora do fluxo normal (ex.: URL
+// malformada, resposta já enviada) nunca pode travar a função serverless nem
+// devolver HTML — a resposta é sempre JSON.
+function respondFatal(res, e) {
+  console.error('[API] Falha fora do fluxo:', (e && e.stack) || e);
+  try {
+    json(res, 500, { error: `Erro no servidor: ${reasonDaFalha(e) || 'falha inesperada.'}` });
+  } catch (_) {
+    try { res.end(); } catch (_) { /* já respondida */ }
+  }
 }
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'application/javascript', '.png': 'image/png', '.json': 'application/json', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
+  req._t0 = Date.now();
   if (req.method === 'OPTIONS') {
     res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
     return res.end();
@@ -957,12 +1057,21 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, headers); res.end(content);
     });
   });
-});
+}
+
+// Toda requisição passa por aqui: qualquer falha — inclusive fora do fluxo
+// normal da API — vira resposta JSON em vez de travar a função serverless.
+function serve(req, res) {
+  handleRequest(req, res).catch((fatal) => respondFatal(res, fatal));
+}
+
+const server = http.createServer(serve);
 
 // Execução local: node server.js
 if (require.main === module) {
   server.listen(PORT, HOST, () => console.log(` FROTA PRO v${VERSION} — http://${HOST}:${PORT} — banco: ${sql ? 'Neon (Postgres)' : 'arquivo local'}`));
 }
 
-// Exporta o handler para execução serverless (Vercel)
-module.exports = (req, res) => server.emit('request', req, res);
+// Execução serverless (Vercel): chama o handler direto e garante resposta JSON
+// até em falha fatal — nunca HTML, nunca travamento.
+module.exports = (req, res) => serve(req, res);

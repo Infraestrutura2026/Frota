@@ -113,3 +113,14 @@ Acesse `http://localhost:8080` — login: **admin / admin2025**
 > e o mesmo texto sai no log da função na Vercel (`[API] POST /api/manutencoes → ...`), em vez
 > de um genérico "Erro interno no servidor.". `INSERT` com colisão de id (`23505`) é refazido
 > automaticamente, evitando erro ao lançar duas OS no mesmo instante.
+> Quando o erro não vem da API (página da plataforma, bloqueio de proxy/firewall,
+> timeout), o aviso mostra o status HTTP e um trecho da resposta
+> (`Não foi possível salvar: Erro na API (HTTP 403) — ... Pode ser bloqueio da
+> rede/proxy — fale com o TI.`), com dicas conforme o caso.
+>
+> ⏱️ **Tempo**: a inicialização do banco roda em paralelo (criações, ajustes,
+> migração e seed), o limite da função na Vercel é de 60s (`maxDuration`) e cada
+> ida ao Neon tem teto de 20s — estourando, a API responde JSON 504 e o registro
+> entra na fila offline em vez de falhar sem explicação. O navegador aguarda cada
+> chamada por até 30s. A API nunca devolve HTML: até falhas fora do fluxo normal
+> viram JSON 500.
