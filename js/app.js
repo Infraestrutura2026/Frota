@@ -152,7 +152,10 @@ const App = (function() {
         try{
           if(item.op==='delete'){
             try{await api('/manutencoes/'+item.id,{method:'DELETE'});}
-            catch(e){ if(!isOfflineError(e)&&e.status!==404) throw e; } // 404: já não existe no servidor
+            // v3.8.3 — o atalho "404 = já não existe" só vale para 404 da NOSSA
+            // API (JSON). 404 fora de JSON é página da plataforma/proxy: a
+            // requisição não chegou à função, então o item FICA na fila.
+            catch(e){ if(!isOfflineError(e)&&!(e.status===404&&e.doNosso)) throw e; }
             maintenances=maintenances.filter(x=>Number(x.id)!==Number(item.id));
           }else{
             const saved=await api(item.op==='update'?'/manutencoes/'+item.id:'/manutencoes',
@@ -187,7 +190,8 @@ const App = (function() {
         try{
           if(item.op==='delete'){
             try{await api('/vehicles/'+item.id,{method:'DELETE'});}
-            catch(e){ if(!isOfflineError(e)&&e.status!==404) throw e; }
+            // v3.8.3 — idem: só 404 da nossa API (JSON) encerra o item da fila.
+            catch(e){ if(!isOfflineError(e)&&!(e.status===404&&e.doNosso)) throw e; }
             vehicles=vehicles.filter(x=>Number(x.id)!==Number(item.id));
           }else{
             const saved=await api(item.op==='update'?'/vehicles/'+item.id:'/vehicles',
@@ -254,6 +258,45 @@ const App = (function() {
     }catch(_){ return ''; }
   }
 
+  // v3.8.3 — Rota alternativa da família /manutencoes.
+  // Em produção um DELETE /api/manutencoes/123 voltava 404 com o corpo
+  // "The page could not be found NOT_FOUND gru1::...": a página NOT_FOUND da
+  // Vercel (HTML), não o JSON da API — ou seja, a requisição NEM CHEGOU à
+  // função (deploy trocando, rewrite perdido, proxy no caminho). Como só o
+  // POST conhecia o alias /api/manutencao, os demais métodos desistiam.
+  // Agora QUALQUER método dessa família tem o mesmo fallback:
+  //   /manutencoes          → /manutencao
+  //   /manutencoes/123      → /manutencao/123
+  //   /manutencoes?placa=X  → /manutencao?placa=X
+  // Devolve null quando o path não é dessa família.
+  function altManutencaoPath(path){
+    const m=/^\/manutencoes(?:\/([^?#]*))?([?#].*)?$/.exec(String(path||''));
+    if(!m) return null;
+    return '/manutencao'+(m[1]?'/'+m[1]:'')+(m[2]||'');
+  }
+
+  // v3.8.3 — A resposta veio da NOSSA API? A API responde SEMPRE JSON
+  // (server.js: até as falhas fora do fluxo viram JSON). Qualquer outro
+  // content-type (HTML da plataforma, página de proxy, cache velho) significa
+  // que quem respondeu não foi a função — e um 404 assim NÃO quer dizer
+  // "registro não encontrado".
+  function respostaDaApi(r){
+    try{ return /application\/json/i.test(String((r&&r.headers&&r.headers.get('content-type'))||'')); }
+    catch(_){ return false; }
+  }
+
+  // Mensagem do 404 que não veio da API: diz com todas as letras que a
+  // requisição não chegou à função e que NADA foi alterado no servidor — o
+  // oposto do antigo "Não foi possível excluir: Erro na API (HTTP 404)", que o
+  // usuário lia como "o registro foi apagado/estragado".
+  function api404ForaDaApiMessage(r, tag){
+    const vid=vercelId(r);
+    let msg='A requisição NÃO chegou à API (HTTP 404 fora da API — quem respondeu foi a plataforma/proxy, não a função). Nada foi alterado no servidor: o registro continua como estava';
+    msg+=vid?` [x-vercel-id: ${vid.slice(0,60)}]`:' [sem x-vercel-id]';
+    msg+=' '+tag;
+    return msg;
+  }
+
   // Quando o erro NÃO vem como JSON da API (página HTML da plataforma, bloqueio
   // de proxy/firewall, timeout do gateway...), mostra o status HTTP + um trecho
   // da resposta, em vez do críptico "Erro na API" que não dizia nada.
@@ -276,24 +319,23 @@ const App = (function() {
   async function api(path, opts){
     const ctrl=new AbortController();
     const timer=setTimeout(()=>ctrl.abort(), API_TIMEOUT_MS);
+    const method=String((opts&&opts.method)||'GET').toUpperCase();
+    const alt=altManutencaoPath(path); // v3.8.3 — null fora da família /manutencoes
     let finalPath=path;
     let r;
     try{
       r=await fetch(withCacheBust('/api'+path), { ...(opts||{}), signal: ctrl.signal });
-      // v3.8 — rota alternativa automática: se um POST em /manutencoes recebe
-      // 404 que NÃO veio da nossa API (a API responde 404 com JSON
-      // {"error":"Not found"}; resposta fora de JSON é página da plataforma,
-      // proxy ou 404 velho preso em cache), tenta de novo uma única vez no
-      // alias /api/manutencao, que o servidor também atende.
-      if(r.status===404 && String((opts&&opts.method)||'GET').toUpperCase()==='POST'
-        && (path==='/manutencoes' || path.indexOf('/manutencoes?')===0)){
-        const ct=String((r.headers&&r.headers.get('content-type'))||'');
-        if(!/application\/json/i.test(ct)){
-          try{ console.warn('[API] POST', path, '404 fora da API', cacheTag(r), '→ tentando rota alternativa /api/manutencao'); }catch{}
-          try{ if(r.body&&r.body.cancel) r.body.cancel(); }catch{}
-          finalPath='/manutencao';
-          r=await fetch(withCacheBust('/api/manutencao'), { ...(opts||{}), signal: ctrl.signal });
-        }
+      // v3.8.3 — rota alternativa automática para QUALQUER método (antes era
+      // só o POST): se a família /manutencoes recebe 404 que NÃO veio da nossa
+      // API (a API responde 404 com JSON {"error":"Not found"}; resposta fora
+      // de JSON é página da plataforma, proxy ou 404 velho preso em cache),
+      // tenta de novo uma única vez no alias /api/manutencao, que o servidor
+      // também atende.
+      if(r.status===404 && alt && !respostaDaApi(r)){
+        try{ console.warn('[API]', method, path, '404 fora da API', cacheTag(r), '→ tentando rota alternativa /api'+alt); }catch{}
+        try{ if(r.body&&r.body.cancel) r.body.cancel(); }catch{}
+        finalPath=alt;
+        r=await fetch(withCacheBust('/api'+alt), { ...(opts||{}), signal: ctrl.signal });
       }
     }catch(err){
       clearTimeout(timer);
@@ -307,6 +349,7 @@ const App = (function() {
     }
     clearTimeout(timer);
     const tag=cacheTag(r);
+    const doNosso=respostaDaApi(r); // v3.8.3 — veio da nossa API (JSON) ou não?
     if(!r.ok){
       let raw=''; try{ raw=await r.text(); }catch{}
       let msg=null; try{ msg=(JSON.parse(raw)||{}).error||null; }catch{}
@@ -314,9 +357,22 @@ const App = (function() {
       msg+=' '+tag; // visibilidade: veio do cache (HIT) ou da origem (MISS)?
       const e=new Error(msg);
       e.status=r.status;
+      e.doNosso=doNosso; // v3.8.3 — quem respondeu: a API (true) ou outra coisa (false)
+      // v3.8.3 — 404 FORA da API não é "registro não encontrado": é a
+      // requisição que não chegou à função (página NOT_FOUND da Vercel,
+      // proxy/firewall, cache velho). Tratar como indisponibilidade faz a
+      // operação ser ENFILEIRADA e repetida depois, em vez de ser descartada
+      // com um aviso que o usuário lê como perda do registro.
+      if(r.status===404 && !doNosso){
+        e.message=api404ForaDaApiMessage(r, tag);
+        e.offline=true;
+        e.foraDaApi=true;
+        try{ console.warn('[API] 404 fora da API em', method, finalPath, cacheTag(r), vercelId(r)?('x-vercel-id='+vercelId(r)):'sem-x-vercel-id', String(raw||'').slice(0,200)); }catch{}
+        throw e;
+      }
       if(r.status===502||r.status===503||r.status===504) e.offline=true; // gateway indisponível
       else { online=true; setConnStatus(true); } // o servidor RESPONDEU: está alcançável
-      try{ console.error('[API]', r.status, finalPath, tag, vercelId(r)?('x-vercel-id='+vercelId(r)):'sem-x-vercel-id', String(raw||'').slice(0,500)); }catch{}
+      try{ console.error('[API]', r.status, finalPath, tag, doNosso?'da-API':'fora-da-API', vercelId(r)?('x-vercel-id='+vercelId(r)):'sem-x-vercel-id', String(raw||'').slice(0,500)); }catch{}
       throw e;
     }
     online=true; setConnStatus(true);
@@ -325,6 +381,7 @@ const App = (function() {
     }catch(err){
       const e=new Error(apiErrorMessage(r.status,'resposta inválida do servidor', r)+' '+tag);
       e.status=r.status;
+      e.doNosso=false; // corpo não é JSON → não foi a nossa API que respondeu
       throw e;
     }
   }
@@ -899,6 +956,7 @@ const App = (function() {
     const item=maintenances.find(x=>Number(x.id)===Number(id));
     const label=item?.tipo==='TROCA DE ÓLEO'?'troca de óleo':'manutenção';
     if(!confirm(`Excluir o registro de ${label} de ${dateLabel(item?.data)}?`))return;
+    let foraDaApi=false; // v3.8.3 — 404 da plataforma/proxy (a requisição não chegou à função)
     // SEMPRE tenta a API primeiro (independe da flag online)
     try{
       await api('/manutencoes/'+id,{method:'DELETE'});
@@ -907,18 +965,38 @@ const App = (function() {
       if(loadQueue().length) flushMaintenanceQueue(); // aproveita para drenar a fila
       toast('Registro excluído!'); return;
     }catch(e){
+      // v3.8.3 — 404 vindo DA API (JSON {"error":"Not found"}): o registro já
+      // não existe no servidor (outro computador apagou, ou foi apagado numa
+      // tentativa anterior). A exclusão está feita — conclui e tira da tela,
+      // em vez de deixar o fantasma lá e enfileirar uma exclusão inútil.
+      if(e&&e.status===404&&e.doNosso){
+        const q=loadQueue();
+        // Sai da fila o que ainda apontava para esse id: sem isso a fila
+        // trava num PATCH que nunca vai existir no servidor.
+        const descartouEdicao=q.some(x=>x.op==='update'&&Number(x.id)===Number(id));
+        saveQueue(q.filter(x=>!(Number(x.id)===Number(id)&&(x.op==='delete'||x.op==='update'))));
+        maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));
+        saveMaintCache(); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
+        toast('Registro já não existe no servidor — removido da tela.'+(descartouEdicao?' A edição pendente dele foi descartada.':''),'aviso');
+        return;
+      }
       if(!isOfflineError(e)){ toast('Não foi possível excluir: '+e.message,'aviso'); return; }
+      foraDaApi=!!e.foraDaApi;
       online=false; setConnStatus(false); // API fora do ar
     }
     // API indisponível: exclui localmente E enfileira a exclusão (ou descarta create pendente)
     const q=loadQueue();
+    // v3.8.3 — 404 que não veio da API: a exclusão NÃO foi perdida, está na
+    // fila. A mensagem deixa isso explícito — o antigo "Não foi possível
+    // excluir: Erro na API (HTTP 404)" fazia parecer que o registro sumiu.
+    const avisoForaDaApi='A requisição não chegou à API (404 da plataforma, não da função) — o registro NÃO foi alterado no servidor. ';
     if(isPendingRecord(item)){
       saveQueue(q.filter(x=>!(x.op==='create'&&Number(x.localId)===Number(id))));
-      toast('Registro excluído neste dispositivo (ainda não sincronizado com a API).','aviso');
+      toast((foraDaApi?avisoForaDaApi:'')+'Registro excluído neste dispositivo (ainda não sincronizado com a API).','aviso');
     }else{
       if(!q.some(x=>x.op==='delete'&&Number(x.id)===Number(id))) q.push({op:'delete',id:Number(id)});
       saveQueue(q);
-      toast('Registro excluído localmente — a exclusão será sincronizada quando a API voltar.','aviso');
+      toast((foraDaApi?avisoForaDaApi:'')+'Exclusão enfileirada neste dispositivo — será repetida automaticamente assim que a API responder.','aviso');
     }
     maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));
     saveMaintCache(); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
@@ -1023,6 +1101,7 @@ const App = (function() {
 
   async function deleteVehicle(id){
     const v=vehicles.find(x=>x.id===id); if(!confirm('Excluir '+v?.placa+'?'))return;
+    let foraDaApi=false; // v3.8.3 — 404 da plataforma/proxy (a requisição não chegou à função)
     // SEMPRE tenta a API primeiro (independe da flag online)
     try{
       await api('/vehicles/'+id,{method:'DELETE'});
@@ -1032,18 +1111,31 @@ const App = (function() {
       toast('Veículo excluído');
       return;
     }catch(e){
+      // v3.8.3 — 404 vindo DA API (JSON): o veículo já não existe no servidor.
+      // Conclui a exclusão e tira da tela em vez de manter o fantasma.
+      if(e&&e.status===404&&e.doNosso){
+        const q=loadVehicleQueue();
+        const descartouEdicao=q.some(x=>x.op==='update'&&Number(x.id)===Number(id));
+        saveVehicleQueue(q.filter(x=>!(Number(x.id)===Number(id)&&(x.op==='delete'||x.op==='update'))));
+        vehicles=vehicles.filter(x=>x.id!==id);
+        saveCache(); renderVehicles(); renderDashboard();
+        toast('Veículo já não existe no servidor — removido da tela.'+(descartouEdicao?' A edição pendente dele foi descartada.':''),'aviso');
+        return;
+      }
       if(!isOfflineError(e)){ toast('Não foi possível excluir o veículo: '+e.message,'aviso'); return; }
+      foraDaApi=!!e.foraDaApi;
       online=false; setConnStatus(false); // API fora do ar
     }
     // API indisponível: exclui localmente E enfileira a exclusão (ou descarta create pendente)
     const q=loadVehicleQueue();
+    const avisoForaDaApi='A requisição não chegou à API (404 da plataforma, não da função) — o veículo NÃO foi alterado no servidor. ';
     if(v&&isPendingRecord(v)){
       saveVehicleQueue(q.filter(x=>!(x.op==='create'&&Number(x.localId)===Number(id))));
-      toast('Veículo excluído neste dispositivo (ainda não sincronizado com a API).','aviso');
+      toast((foraDaApi?avisoForaDaApi:'')+'Veículo excluído neste dispositivo (ainda não sincronizado com a API).','aviso');
     }else{
       if(!q.some(x=>x.op==='delete'&&Number(x.id)===Number(id))) q.push({op:'delete',id:Number(id)});
       saveVehicleQueue(q);
-      toast('Veículo excluído localmente — a exclusão será sincronizada quando a API voltar.','aviso');
+      toast((foraDaApi?avisoForaDaApi:'')+'Exclusão enfileirada neste dispositivo — será repetida automaticamente assim que a API responder.','aviso');
     }
     vehicles=vehicles.filter(x=>x.id!==id); saveCache(); renderVehicles(); renderDashboard();
   }
