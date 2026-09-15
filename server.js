@@ -1,7 +1,7 @@
 'use strict';
 
 // ============================================================
-// FROTA PRO v3.8 — Controle de Frota (grupos S2, S3 e S4)
+// FROTA PRO v3.8.1 — Controle de Frota (grupos S2, S3 e S4)
 // Servidor Node nativo: API REST + arquivos estáticos.
 //
 // Persistência:
@@ -13,6 +13,13 @@
 // Cache-Control: no-store para nenhuma camada intermediária
 // (CDN/proxy/browser) servir resposta velha da API. O front
 // ainda acrescenta ?_t=<timestamp> em cada chamada.
+//
+// v3.8.1 — GET /api/echo: a função devolve exatamente o que RECEBEU
+// da rede (path, método, host, cabeçalhos de proxy). Serve para flagrar
+// rede que altera a requisição no caminho — proxy corporativo/firewall
+// que troca POST por GET, reescreve o path, troca o Host, come o corpo
+// ou injeta cabeçalhos. Se /api/echo não responder JSON da API, a
+// resposta está vindo de outra coisa (proxy, cache, firewall).
 // ============================================================
 
 const http = require('http');
@@ -26,7 +33,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.8';
+const VERSION = '3.8.1';
 
 // Tempo máximo de UMA ida ao banco. O driver da Neon fala por HTTP (cada query =
 // 1 fetch) e não tem timeout próprio: com o banco suspenso/lento, a função ficava
@@ -851,6 +858,152 @@ function invalidJsonError() {
   return err;
 }
 
+// ============================================================
+// v3.8.1 — Espelho da rede (GET /api/echo)
+// ============================================================
+// A função devolve EXATAMENTE o que recebeu: path, método, host, query e
+// cabeçalhos de proxy. É a prova dos nove contra rede que altera a
+// requisição no caminho. Sintomas que este endpoint expõe:
+//   • POST que chega como GET (proxy que "normaliza" método e perde o corpo);
+//   • path reescrito (/api/manutencoes → /api/manutencao, ou barras a mais);
+//   • Host trocado por proxy transparente (X-Forwarded-Host ≠ Host);
+//   • corpo comido no caminho (Content-Length que não chega);
+//   • resposta que nem passou pela Vercel (ausência de x-vercel-id).
+// Se /api/echo NÃO devolver este JSON, quem respondeu foi outra coisa
+// (página da plataforma, proxy, firewall, cache da rede) — não a API.
+
+// Nunca ecoar credenciais: um endpoint de diagnóstico não pode virar
+// vazamento de sessão.
+const ECHO_REDACT = new Set([
+  'cookie', 'set-cookie', 'authorization', 'proxy-authorization',
+  'x-api-key', 'x-auth-token', 'x-vercel-signature', 'x-csrf-token'
+]);
+
+// Teto para ler o corpo no /api/echo (ver comentário em echoDiagnostics).
+const ECHO_BODY_TIMEOUT_MS = 5000;
+const ECHO_BODY_TIMEOUT = Symbol('echo-body-timeout');
+
+async function echoDiagnostics(req, requestUrl) {
+  const h = req.headers || {};
+  const get = (name) => (h[name] === undefined ? null : h[name]);
+
+  // Só os cabeçalhos que denunciam intermediários no caminho.
+  const proxyHeaders = {};
+  for (const name of Object.keys(h)) {
+    if (/^(forwarded|via|x-forwarded-|x-real-ip|x-vercel-|x-nf-|cf-|true-client-ip|x-client-ip)/i.test(name)) {
+      proxyHeaders[name] = h[name];
+    }
+  }
+
+  const allHeaders = {};
+  for (const name of Object.keys(h)) {
+    allHeaders[name] = ECHO_REDACT.has(name.toLowerCase()) ? '***omitido***' : h[name];
+  }
+
+  // Corpo: só faz sentido ler quando há corpo. Se a rede comeu o corpo, o
+  // Content-Length anunciado não bate com o que chegou — e isso aparece aqui.
+  // O teto existe porque um Content-Length MENTIROSO (a rede anuncia mais
+  // bytes do que entrega) deixaria a requisição pendurada esperando dados que
+  // nunca chegam: o navegador ficaria carregando até estourar o tempo da
+  // função. Com o limite, o /api/echo SEMPRE responde — e responde dizendo
+  // que o corpo não chegou, que é exatamente o dado que se quer ver.
+  let body = null;
+  let bodyError = null;
+  let bodyIncomplete = false;
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    let timer = null;
+    try {
+      body = await Promise.race([
+        parseBody(req),
+        new Promise((resolve) => {
+          timer = setTimeout(() => resolve(ECHO_BODY_TIMEOUT), ECHO_BODY_TIMEOUT_MS);
+        })
+      ]);
+      if (body === ECHO_BODY_TIMEOUT) {
+        body = null;
+        bodyIncomplete = true;
+        bodyError = `O corpo não chegou completo em ${ECHO_BODY_TIMEOUT_MS}ms (conexão interrompida ou Content-Length maior do que o enviado).`;
+      }
+    } catch (e) {
+      bodyError = (e && e.message) || 'falha ao ler o corpo da requisição.';
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  const declaredLength = get('content-length');
+  const arrivedLength = body === null || body === undefined
+    ? 0
+    : Buffer.byteLength(typeof body === 'string' ? body : JSON.stringify(body));
+
+  const warnings = [];
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    warnings.push(`A requisição chegou como ${req.method} — se foi aberta no navegador, algum intermediário trocou o método.`);
+  }
+  if (declaredLength && arrivedLength && Number(declaredLength) > arrivedLength) {
+    warnings.push(`Corpo truncado no caminho: Content-Length anunciava ${declaredLength} bytes, chegaram ${arrivedLength}.`);
+  }
+  if (!declaredLength && (req.method === 'POST' || req.method === 'PATCH' || req.method === 'PUT')) {
+    warnings.push(`${req.method} chegou SEM Content-Length: a rede pode ter removido o corpo da requisição.`);
+  }
+  const fwdHost = get('x-forwarded-host');
+  if (fwdHost && h.host && fwdHost !== h.host) {
+    warnings.push(`Host reescrito no caminho: Host="${h.host}", mas X-Forwarded-Host="${fwdHost}".`);
+  }
+  if (get('via')) {
+    warnings.push(`Requisição passou por proxy declarado em Via="${get('via')}".`);
+  }
+  if (!get('x-vercel-id')) {
+    warnings.push('Sem x-vercel-id: esta requisição NÃO foi identificada pela Vercel — pode ter sido respondida por proxy, cache ou firewall da rede.');
+  }
+  if (bodyError) {
+    warnings.push(`Corpo da requisição ilegível: ${bodyError}`);
+  }
+  if (bodyIncomplete) {
+    warnings.push(`Corpo incompleto: Content-Length anunciava ${declaredLength} bytes, mas a requisição travou esperando o resto — sintoma clássico de rede que trunca/envia corpo pela metade.`);
+  }
+
+  return {
+    ok: true,
+    version: VERSION,
+    o_que_e: 'JSON gerado pela própria API (server.js). Se isto não aparecer, a resposta veio de outra coisa — proxy, cache da rede, firewall ou página da plataforma.',
+    recebido: {
+      metodo: req.method,
+      path: requestUrl.pathname,
+      query_string: requestUrl.search || '',
+      query: Object.fromEntries(requestUrl.searchParams.entries()),
+      http_version: req.httpVersion,
+      url_completa: requestUrl.pathname + (requestUrl.search || '')
+    },
+    host: {
+      host: get('host') || null,
+      x_forwarded_host: fwdHost,
+      x_forwarded_proto: get('x-forwarded-proto'),
+      x_forwarded_port: get('x-forwarded-port'),
+      x_forwarded_for: get('x-forwarded-for'),
+      x_real_ip: get('x-real-ip')
+    },
+    cabecalhos_de_proxy: proxyHeaders,
+    cabecalhos: allHeaders,
+    corpo: {
+      content_length_anunciado: declaredLength === null ? null : Number(declaredLength),
+      content_length_recebido: arrivedLength,
+      conteudo: body,
+      erro: bodyError
+    },
+    plataforma: {
+      vercel: !!process.env.VERCEL,
+      regiao: process.env.VERCEL_REGION || null,
+      vercel_url: process.env.VERCEL_URL || null,
+      commit: process.env.VERCEL_GIT_COMMIT_SHA ? String(process.env.VERCEL_GIT_COMMIT_SHA).slice(0, 7) : null,
+      node: process.version,
+      banco: sql ? 'neon (Postgres)' : 'arquivo local (data/db.json)'
+    },
+    avisos: warnings,
+    recebido_em: new Date().toISOString()
+  };
+}
+
 function parseBody(req) {
   // Na Vercel, o runtime lê o corpo antes de chamar a função e o expõe em
   // req.body (getter preguiçoso: o acesso pode lançar se o JSON for inválido).
@@ -954,6 +1107,13 @@ async function handleRequest(req, res) {
     if (pathname.startsWith('/api/')) {
       const parts = pathname.replace('/api/', '').split('/');
       const resource = parts[0], id = parts[1] ? parseInt(parts[1], 10) : null;
+
+      // v3.8.1 — espelho da rede. Aceita QUALQUER método de propósito: se a
+      // rede trocar POST por GET no caminho, este JSON mostra o método que
+      // realmente chegou à função (não o que o navegador enviou).
+      if (resource === 'echo') {
+        return json(res, 200, await echoDiagnostics(req, requestUrl));
+      }
 
       if (resource === 'status') {
         const vehicles = await listVehicles();

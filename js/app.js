@@ -239,10 +239,27 @@ const App = (function() {
     }catch(_){ return '[cache ?]'; }
   }
 
+  // v3.8.1 — x-vercel-id: a Vercel põe esse cabeçalho (região + id do deploy)
+  // em TODA resposta que passa pela plataforma. Ele é o "recibo" de que a
+  // resposta veio da nossa função. Quando falta, a resposta NÃO veio da API:
+  // veio de proxy da rede, firewall, cache intermediário ou de uma página da
+  // plataforma. É isso que separa "a função falhou" de "a rede no meio do
+  // caminho respondeu no lugar da função" — diagnósticos completamente
+  // diferentes, que antes apareciam iguais.
+  function vercelId(r){
+    try{
+      const h=r&&r.headers;
+      const id=h?String(h.get('x-vercel-id')||'').trim():'';
+      return id||'';
+    }catch(_){ return ''; }
+  }
+
   // Quando o erro NÃO vem como JSON da API (página HTML da plataforma, bloqueio
   // de proxy/firewall, timeout do gateway...), mostra o status HTTP + um trecho
   // da resposta, em vez do críptico "Erro na API" que não dizia nada.
-  function apiErrorMessage(status, rawText){
+  // v3.8.1 — a mensagem agora sai com o x-vercel-id quando ele existe, e diz
+  // claramente quando não existe (resposta gerada fora da API).
+  function apiErrorMessage(status, rawText, r){
     const clean=String(rawText||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().slice(0,180);
     let msg=`Erro na API (HTTP ${status})`;
     if(clean) msg+=` — ${clean}`;
@@ -250,6 +267,9 @@ const App = (function() {
     else if(status===413) msg+='. Dados grandes demais para enviar.';
     else if(status===401&&/sso|log\s?in|sign\s?in|vercel|expir/i.test(clean)) msg+='. Sessão expirada — recarregue a página e entre novamente.';
     else if(status===401||status===403||/bloquead|blocked|forbidden|negad|denied|proxy|firewall|acesso restrito|unauthor/i.test(clean)) msg+='. Pode ser bloqueio da rede/proxy — fale com o TI.';
+    const vid=vercelId(r);
+    msg += vid ? ` [x-vercel-id: ${vid.slice(0,60)}]` : ' [sem x-vercel-id]';
+    if(!vid) msg += ' — a resposta NÃO veio da API na Vercel: veio de proxy, firewall, cache ou página da plataforma.';
     return msg;
   }
 
@@ -290,20 +310,20 @@ const App = (function() {
     if(!r.ok){
       let raw=''; try{ raw=await r.text(); }catch{}
       let msg=null; try{ msg=(JSON.parse(raw)||{}).error||null; }catch{}
-      if(!msg) msg=apiErrorMessage(r.status, raw);
+      if(!msg) msg=apiErrorMessage(r.status, raw, r);
       msg+=' '+tag; // visibilidade: veio do cache (HIT) ou da origem (MISS)?
       const e=new Error(msg);
       e.status=r.status;
       if(r.status===502||r.status===503||r.status===504) e.offline=true; // gateway indisponível
       else { online=true; setConnStatus(true); } // o servidor RESPONDEU: está alcançável
-      try{ console.error('[API]', r.status, finalPath, tag, String(raw||'').slice(0,500)); }catch{}
+      try{ console.error('[API]', r.status, finalPath, tag, vercelId(r)?('x-vercel-id='+vercelId(r)):'sem-x-vercel-id', String(raw||'').slice(0,500)); }catch{}
       throw e;
     }
     online=true; setConnStatus(true);
     try{
       return await r.json();
     }catch(err){
-      const e=new Error(apiErrorMessage(r.status,'resposta inválida do servidor')+' '+tag);
+      const e=new Error(apiErrorMessage(r.status,'resposta inválida do servidor', r)+' '+tag);
       e.status=r.status;
       throw e;
     }
