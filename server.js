@@ -1,7 +1,7 @@
 'use strict';
 
 // ============================================================
-// FROTA PRO v3.8.2 — Controle de Frota (grupos S2, S3 e S4)
+// FROTA PRO v3.8.3 — Controle de Frota (grupos S2, S3 e S4)
 // Servidor Node nativo: API REST + arquivos estáticos.
 //
 // Persistência:
@@ -31,6 +31,16 @@
 // `sig=` trocada dentro de `forwarded`, dump completo dos cabeçalhos só
 // com `?completo=1` e a lista `campos_omitidos` para que omissão não seja
 // confundida com ausência do cabeçalho.
+//
+// v3.8.3 — versão que acompanha a correção da exclusão perdida por 404 da
+// plataforma. O sintoma, em produção: "Não foi possível excluir: Erro na API
+// (HTTP 404) — The page could not be found NOT_FOUND gru1::... [cache MISS]".
+// Esse corpo é a página NOT_FOUND da Vercel (HTML), não o JSON da API: a
+// requisição nem chegava à função, mas o app tratava como erro definitivo e
+// DESCARTAVA a exclusão. A correção está no front (js/app.js): rota
+// alternativa /api/manutencao para qualquer método, distinção entre 404 da
+// API (JSON) e 404 fora dela (HTML) e, no segundo caso, a exclusão é
+// enfileirada em vez de perdida. O servidor não muda de comportamento.
 // ============================================================
 
 const http = require('http');
@@ -44,7 +54,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.8.2';
+const VERSION = '3.8.3';
 
 // Tempo máximo de UMA ida ao banco. O driver da Neon fala por HTTP (cada query =
 // 1 fetch) e não tem timeout próprio: com o banco suspenso/lento, a função ficava

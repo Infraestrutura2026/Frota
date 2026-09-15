@@ -222,3 +222,29 @@ no banco.
 > repete automaticamente no alias `/api/manutencao`. Além disso, todo erro da
 > API mostra a tag `[cache HIT]` / `[cache MISS]` — HIT indica que a resposta
 > veio de uma camada de cache, MISS que veio direto da origem.
+>
+> 🗑️ **Exclusão não se perde mais com 404 da plataforma (v3.8.3)**: em produção
+> aparecia `Não foi possível excluir: Erro na API (HTTP 404) — The page could
+> not be found NOT_FOUND gru1::... [cache MISS]`. Esse corpo é a **página
+> NOT_FOUND da Vercel** (HTML), não o JSON da API — a requisição **nem chegava
+> à função** (deploy trocando no meio, rewrite perdido, proxy no caminho) — e,
+> ainda assim, o app tratava como erro definitivo e **descartava a exclusão**,
+> deixando o registro na tela como se nada tivesse acontecido. Agora:
+>
+> - o alias `/api/manutencao` cobre **qualquer método** da família
+>   (`/manutencoes[/:id]` → `/manutencao[/:id]`, query preservada), não só o
+>   POST: GET, POST, PATCH/PUT e DELETE ganham a segunda tentativa quando o
+>   404 não veio da nossa API;
+> - cada erro carrega `doNosso` (a resposta veio da nossa API? = `content-type`
+>   é JSON). **404 fora de JSON vira indisponibilidade**: a exclusão é
+>   enfileirada e repetida automaticamente, em vez de perdida;
+> - **404 vindo da API** (JSON `{"error":"Not found"}`) na exclusão de
+>   manutenção ou veículo é tratado como "já não existe": a exclusão é
+>   concluída e o registro sai da tela (e sai da fila o que ainda apontava para
+>   aquele id, para a fila não travar);
+> - nas filas de sincronização, o atalho "404 = já não existe" **só** vale para
+>   404 da nossa API — 404 da plataforma mantém o item na fila;
+> - a mensagem passou a dizer a verdade:
+>   `A requisição não chegou à API (404 da plataforma, não da função) — o
+>   registro NÃO foi alterado no servidor. Exclusão enfileirada neste
+>   dispositivo — será repetida automaticamente assim que a API responder.`

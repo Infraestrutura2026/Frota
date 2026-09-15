@@ -1,6 +1,6 @@
 {
   "name": "frota-pro",
-  "version": "3.8.2",
+  "version": "3.8.3",
   "description": "Sistema de controle de frota — grupos S2, S3 e S4",
   "main": "server.js",
   "scripts": {
