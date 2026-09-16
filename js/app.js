@@ -316,7 +316,7 @@ const App = (function() {
     return msg;
   }
 
-  async function api(path, opts){
+  async function api(path, opts, isRetry = false){
     const ctrl=new AbortController();
     const timer=setTimeout(()=>ctrl.abort(), API_TIMEOUT_MS);
     const method=String((opts&&opts.method)||'GET').toUpperCase();
@@ -339,6 +339,11 @@ const App = (function() {
       }
     }catch(err){
       clearTimeout(timer);
+      // Retentativa automática em falha de rede transitória (cold-start / oscilação rápida)
+      if(!isRetry && (!err || err.name!=='AbortError')){
+        await new Promise(res=>setTimeout(res, 800));
+        return api(path, opts, true);
+      }
       if(err && err.name==='AbortError'){
         const t=new Error('Tempo esgotado na comunicação com o servidor (30s). Tente novamente.');
         t.offline=true; t.status=0; // entra na fila e sincroniza depois
@@ -348,6 +353,14 @@ const App = (function() {
       throw err;
     }
     clearTimeout(timer);
+
+    // Retentativa automática se gateway retornou 502/503/504 (ex: Neon acordando do modo suspenso)
+    if(!isRetry && (r.status===502 || r.status===503 || r.status===504)){
+      try{ if(r.body&&r.body.cancel) r.body.cancel(); }catch{}
+      await new Promise(res=>setTimeout(res, 1200));
+      return api(path, opts, true);
+    }
+
     const tag=cacheTag(r);
     const doNosso=respostaDaApi(r); // v3.8.3 — veio da nossa API (JSON) ou não?
     if(!r.ok){
@@ -436,8 +449,56 @@ const App = (function() {
 
   function setConnStatus(on){
     const el=document.getElementById('conn-status'); if(!el)return;
-    el.textContent=on?'● Online':'● Offline';
-    el.className='conn-status '+(on?'conn-on':'conn-off');
+    const qCount = loadQueue().length + loadVehicleQueue().length;
+    if(on){
+      el.textContent = qCount > 0 ? `● Online (${qCount} pendente)` : '● Online';
+      el.title = 'Conectado ao servidor. Clique para testar conexão e sincronizar.';
+      el.className = 'conn-status conn-on';
+    }else{
+      el.textContent = qCount > 0 ? `● Offline (${qCount} pendente)` : '● Offline';
+      el.title = 'Sem conexão com o servidor. Clique para tentar reconectar agora.';
+      el.className = 'conn-status conn-off';
+    }
+  }
+
+  let checkingConnection = false;
+  async function checkConnection(silent = false){
+    if(checkingConnection) return;
+    checkingConnection = true;
+    try{
+      await api('/status');
+      const wasOffline = !online;
+      online = true;
+      const qM = loadQueue().length;
+      const qV = loadVehicleQueue().length;
+      if(qM > 0) await flushMaintenanceQueue();
+      if(qV > 0) await flushVehicleQueue();
+      setConnStatus(true);
+      if(wasOffline && !silent){
+        toast('Conexão restabelecida! Sistema online.', 'success');
+      } else if(!silent){
+        toast('Conexão com a API OK!', 'success');
+      }
+    }catch(e){
+      online = false;
+      setConnStatus(false);
+      if(!silent){
+        toast('Servidor indisponível: ' + (e.message || 'sem resposta'), 'aviso');
+      }
+    }finally{
+      checkingConnection = false;
+    }
+  }
+
+  const HEARTBEAT_ONLINE_MS = 30000;
+  const HEARTBEAT_OFFLINE_MS = 10000;
+  let heartbeatTimer = null;
+  function scheduleHeartbeat(delay){
+    if(heartbeatTimer) clearTimeout(heartbeatTimer);
+    heartbeatTimer = setTimeout(async () => {
+      await checkConnection(true);
+      scheduleHeartbeat(online ? HEARTBEAT_ONLINE_MS : HEARTBEAT_OFFLINE_MS);
+    }, delay || (online ? HEARTBEAT_ONLINE_MS : HEARTBEAT_OFFLINE_MS));
   }
 
   async function hash(p){
@@ -454,9 +515,26 @@ const App = (function() {
     await syncVehicles();
     await syncMaintenances();
     if(currentUser){ renderDashboard(); }
+    scheduleHeartbeat(3000);
   }
 
   function bind(){
+    const cs=document.getElementById('conn-status');
+    if(cs){
+      cs.addEventListener('click', () => {
+        toast('Testando conexão com o servidor...', 'aviso');
+        checkConnection(false);
+      });
+    }
+    window.addEventListener('online', () => {
+      checkConnection(false);
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        checkConnection(true);
+      }
+    });
+
     document.getElementById('login-form').addEventListener('submit',e=>{e.preventDefault();login();});
     const tp=document.getElementById('toggle-login-password');
     if(tp) tp.addEventListener('click',()=>{
@@ -949,7 +1027,8 @@ const App = (function() {
     if(qi>=0)q[qi]=entry; else q.push(entry);
     saveQueue(q);
     saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
-    toast('Sem conexão com a API — registro salvo neste dispositivo e será sincronizado automaticamente.','aviso');
+    toast('Sem conexão com a API — registro salvo neste dispositivo e será sincronizado automaticamente assim que a conexão voltar.','aviso');
+    scheduleHeartbeat(2000);
   }
 
   async function deleteMaintenance(id){
@@ -1000,6 +1079,7 @@ const App = (function() {
     }
     maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));
     saveMaintCache(); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
+    scheduleHeartbeat(2000);
   }
 
   // ============ TROCA DE ÓLEO (visão ligada à Manutenção) ============
@@ -1096,7 +1176,8 @@ const App = (function() {
       saveVehicleQueue(q);
     }
     saveCache(); closeModal('vehicle-modal'); renderVehicles(); renderDashboard();
-    toast('Veículo salvo localmente — será sincronizado quando a API voltar.','aviso');
+    toast('Veículo salvo localmente — será sincronizado assim que a conexão voltar.','aviso');
+    scheduleHeartbeat(2000);
   }
 
   async function deleteVehicle(id){
@@ -1138,9 +1219,10 @@ const App = (function() {
       toast((foraDaApi?avisoForaDaApi:'')+'Exclusão enfileirada neste dispositivo — será repetida automaticamente assim que a API responder.','aviso');
     }
     vehicles=vehicles.filter(x=>x.id!==id); saveCache(); renderVehicles(); renderDashboard();
+    scheduleHeartbeat(2000);
   }
 
   function closeModal(id){const el=document.getElementById(id);if(el)el.classList.remove('active');}
 
-  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,openVehicleHistory,renderVehicleHistory,syncVehicleHistory,setHistoryFilter,setHistoryMonth,exportHistoryCsv,formatPlacaMercosul,closeModal,switchPage:page};
+  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,openVehicleHistory,renderVehicleHistory,syncVehicleHistory,setHistoryFilter,setHistoryMonth,exportHistoryCsv,formatPlacaMercosul,closeModal,switchPage:page,checkConnection};
 })();

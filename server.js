@@ -41,6 +41,15 @@
 // alternativa /api/manutencao para qualquer método, distinção entre 404 da
 // API (JSON) e 404 fora dela (HTML) e, no segundo caso, a exclusão é
 // enfileirada em vez de perdida. O servidor não muda de comportamento.
+//
+// v3.8.4 — solução para manter o sistema SEMPRE online:
+//  • Ponto de entrada api/index.js + reconfiguração de rewrites na Vercel
+//    evitam que rotas da API caiam na página NOT_FOUND da plataforma.
+//  • Resolução de pathname no server.js suporta cabeçalhos x-matched-path /
+//    x-forwarded-url da Vercel e atende GET /api direto como status.
+//  • Retentativa automática transparente em falhas transitórias de rede
+//    ou despertar do banco Neon, impedindo falso status offline ao salvar.
+//  • Heartbeat automático e sincronização em segundo plano das filas locais.
 // ============================================================
 
 const http = require('http');
@@ -54,7 +63,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.8.3';
+const VERSION = '3.8.4';
 
 // Tempo máximo de UMA ida ao banco. O driver da Neon fala por HTTP (cada query =
 // 1 fetch) e não tem timeout próprio: com o banco suspenso/lento, a função ficava
@@ -1178,14 +1187,36 @@ async function handleRequest(req, res) {
     res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Cache-Control': 'no-store' });
     return res.end();
   }
-  const requestUrl = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = requestUrl.pathname;
+  const host = req.headers.host || 'localhost';
+  const requestUrl = new URL(req.url, `http://${host}`);
+  let pathname = requestUrl.pathname;
+
+  // Em deploys serverless (Vercel) com rewrite para /api, recupera o path original
+  if (pathname === '/api' || pathname === '/api/' || pathname === '/api/index.js' || pathname === '/api/[...path]') {
+    const rawOrig = req.headers['x-matched-path'] || req.headers['x-forwarded-url'] || req.headers['x-vercel-matched-path'] || req.originalUrl;
+    if (rawOrig && typeof rawOrig === 'string') {
+      try {
+        const parsed = new URL(rawOrig, `http://${host}`);
+        if (parsed.pathname && parsed.pathname !== '/api' && parsed.pathname !== '/api/' && parsed.pathname !== '/api/index.js' && parsed.pathname !== '/api/[...path]') {
+          pathname = parsed.pathname;
+        }
+      } catch {
+        const clean = rawOrig.split('?')[0];
+        if (clean && clean !== '/api' && clean !== '/api/' && clean !== '/api/index.js' && clean !== '/api/[...path]') {
+          pathname = clean;
+        }
+      }
+    }
+  }
+
   const query = Object.fromEntries(requestUrl.searchParams.entries());
 
   try {
-    if (pathname.startsWith('/api/')) {
-      const parts = pathname.replace('/api/', '').split('/');
-      const resource = parts[0], id = parts[1] ? parseInt(parts[1], 10) : null;
+    if (pathname === '/api' || pathname.startsWith('/api/')) {
+      const cleanPath = pathname.replace(/^\/api\/?/, '');
+      const parts = cleanPath.split('/').filter(Boolean);
+      const resource = parts[0] || 'status';
+      const id = parts[1] ? parseInt(parts[1], 10) : null;
 
       // v3.8.1 — espelho da rede. Aceita QUALQUER método de propósito: se a
       // rede trocar POST por GET no caminho, este JSON mostra o método que
