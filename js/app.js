@@ -158,8 +158,24 @@ const App = (function() {
             catch(e){ if(!isOfflineError(e)&&!(e.status===404&&e.doNosso)) throw e; }
             maintenances=maintenances.filter(x=>Number(x.id)!==Number(item.id));
           }else{
-            const saved=await api(item.op==='update'?'/manutencoes/'+item.id:'/manutencoes',
-              {method:item.op==='update'?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item.payload)});
+            // v3.8.5 — update de item que NÃO existe no banco remoto (id local de
+            // timestamp >1e11, ou registro apagado em outro computador) fazia a
+            // fila travar num PATCH que devolvia 404 para sempre. Agora: id local
+            // vai direto por POST e um 404 da API num PATCH é repetido por POST,
+            // que o servidor resolve como upsert — a fila drena e o registro
+            // aparece no banco em vez de ficar preso no dispositivo.
+            const url=item.op==='update'?'/manutencoes/'+item.id:'/manutencoes';
+            const idLocal=item.op==='update' && Number(item.id)>1e11;
+            const corpo=JSON.stringify(item.payload);
+            let saved;
+            try{
+              saved=await api(url,{method:(item.op==='update'&&!idLocal)?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:corpo});
+            }catch(e){
+              if(item.op==='update' && !idLocal && e && e.status===404 && e.doNosso && !isOfflineError(e)){
+                try{ console.warn('[API] PATCH',url,'404 da API → repetindo por POST (upsert) na fila'); }catch{}
+                saved=await api(url,{method:'POST',headers:{'Content-Type':'application/json','X-HTTP-Method-Override':'PATCH'},body:corpo});
+              }else throw e;
+            }
             if(item.op==='create'){
               const i=maintenances.findIndex(x=>Number(x.id)===Number(item.localId));
               if(i>=0)maintenances[i]=saved; else maintenances.unshift(saved);
@@ -194,8 +210,22 @@ const App = (function() {
             catch(e){ if(!isOfflineError(e)&&!(e.status===404&&e.doNosso)) throw e; }
             vehicles=vehicles.filter(x=>Number(x.id)!==Number(item.id));
           }else{
-            const saved=await api(item.op==='update'?'/vehicles/'+item.id:'/vehicles',
-              {method:item.op==='update'?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item.payload)});
+            // v3.8.5 — mesma regra das manutenções: update de veículo que não
+            // existe no banco remoto (id local >1e11 ou apagado em outro
+            // computador) é gravado por POST; 404 da API num PATCH é repetido
+            // por POST (upsert) para a fila não travar.
+            const url=item.op==='update'?'/vehicles/'+item.id:'/vehicles';
+            const idLocal=item.op==='update' && Number(item.id)>1e11;
+            const corpo=JSON.stringify(item.payload);
+            let saved;
+            try{
+              saved=await api(url,{method:(item.op==='update'&&!idLocal)?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:corpo});
+            }catch(e){
+              if(item.op==='update' && !idLocal && e && e.status===404 && e.doNosso && !isOfflineError(e)){
+                try{ console.warn('[API] PATCH',url,'404 da API → repetindo por POST (upsert) na fila'); }catch{}
+                saved=await api(url,{method:'POST',headers:{'Content-Type':'application/json','X-HTTP-Method-Override':'PATCH'},body:corpo});
+              }else throw e;
+            }
             if(item.op==='create'){
               const i=vehicles.findIndex(x=>Number(x.id)===Number(item.localId));
               if(i>=0)vehicles[i]=saved; else vehicles.push(saved);
@@ -316,15 +346,32 @@ const App = (function() {
     return msg;
   }
 
-  async function api(path, opts, isRetry = false){
+  // v3.8.5 — métodos que a rede corporativa costuma BLOQUEAR. Proxy, firewall ou
+  // gateway que só libera GET/POST responde 405 (Method Not Allowed) ou 403
+  // (Forbidden) a PATCH/PUT/DELETE — e alguns nem chegam a responder, derrubando
+  // a conexão (erro de rede). Duas defesas:
+  //  • o cabeçalho X-HTTP-Method-Override vai AUTOMATICAMENTE em todo
+  //    PATCH/PUT/DELETE, então mesmo a requisição original já chega à API
+  //    dizendo o que se pretende fazer (a API resolve o método por ele);
+  //  • se ainda assim vier 405/403 (ou falha de rede) num PATCH/PUT, a chamada
+  //    é repetida como POST + X-HTTP-Method-Override, que a API executa como a
+  //    operação pedida — a edição fica online em vez de cair em modo offline.
+  const METODOS_COM_OVERRIDE = ['PATCH','PUT','DELETE'];
+  const METODOS_COM_FALLBACK_POST = ['PATCH','PUT'];
+
+  async function api(path, opts, isRetry = false, viaPost = false){
     const ctrl=new AbortController();
     const timer=setTimeout(()=>ctrl.abort(), API_TIMEOUT_MS);
     const method=String((opts&&opts.method)||'GET').toUpperCase();
     const alt=altManutencaoPath(path); // v3.8.3 — null fora da família /manutencoes
+    // Cabeçalhos: preserva os que vieram do chamador e acrescenta o override.
+    const headers={...((opts&&opts.headers)||{})};
+    if(!viaPost && METODOS_COM_OVERRIDE.includes(method) && !headers['X-HTTP-Method-Override']) headers['X-HTTP-Method-Override']=method;
+    const fetchOpts={...(opts||{}),headers};
     let finalPath=path;
     let r;
     try{
-      r=await fetch(withCacheBust('/api'+path), { ...(opts||{}), signal: ctrl.signal });
+      r=await fetch(withCacheBust('/api'+path), { ...fetchOpts, signal: ctrl.signal });
       // v3.8.3 — rota alternativa automática para QUALQUER método (antes era
       // só o POST): se a família /manutencoes recebe 404 que NÃO veio da nossa
       // API (a API responde 404 com JSON {"error":"Not found"}; resposta fora
@@ -335,14 +382,23 @@ const App = (function() {
         try{ console.warn('[API]', method, path, '404 fora da API', cacheTag(r), '→ tentando rota alternativa /api'+alt); }catch{}
         try{ if(r.body&&r.body.cancel) r.body.cancel(); }catch{}
         finalPath=alt;
-        r=await fetch(withCacheBust('/api'+alt), { ...(opts||{}), signal: ctrl.signal });
+        r=await fetch(withCacheBust('/api'+alt), { ...fetchOpts, signal: ctrl.signal });
       }
     }catch(err){
       clearTimeout(timer);
       // Retentativa automática em falha de rede transitória (cold-start / oscilação rápida)
       if(!isRetry && (!err || err.name!=='AbortError')){
         await new Promise(res=>setTimeout(res, 800));
-        return api(path, opts, true);
+        return api(path, opts, true, viaPost);
+      }
+      // v3.8.5 — a rede DERRUBOU a conexão num PATCH/PUT (firewall/proxy que
+      // recusa o método sem responder HTTP): repete como POST com
+      // X-HTTP-Method-Override, que a API executa como a edição pedida. Só
+      // desiste — e aí sim cai em modo offline — se o POST também falhar.
+      if(!viaPost && METODOS_COM_FALLBACK_POST.includes(method) && (!err || err.name!=='AbortError')){
+        try{ console.warn('[API]', method, path, 'falha de rede → repetindo como POST com X-HTTP-Method-Override'); }catch{}
+        const optsPost={...(opts||{}),method:'POST',headers:{...headers,'X-HTTP-Method-Override':method}};
+        return api(path, optsPost, isRetry, true);
       }
       if(err && err.name==='AbortError'){
         const t=new Error('Tempo esgotado na comunicação com o servidor (30s). Tente novamente.');
@@ -358,7 +414,19 @@ const App = (function() {
     if(!isRetry && (r.status===502 || r.status===503 || r.status===504)){
       try{ if(r.body&&r.body.cancel) r.body.cancel(); }catch{}
       await new Promise(res=>setTimeout(res, 1200));
-      return api(path, opts, true);
+      return api(path, opts, true, viaPost);
+    }
+
+    // v3.8.5 — 405 (Method Not Allowed) ou 403 (Forbidden) num PATCH/PUT é a
+    // assinatura de proxy corporativo/firewall/gateway que não libera o método.
+    // Em vez de mostrar erro e jogar a edição em modo offline, repete a MESMA
+    // operação como POST + X-HTTP-Method-Override — a API resolve o método pelo
+    // cabeçalho e executa a edição normalmente.
+    if(!viaPost && METODOS_COM_FALLBACK_POST.includes(method) && (r.status===405 || r.status===403)){
+      try{ console.warn('[API]', method, finalPath, 'HTTP '+r.status+' → repetindo como POST com X-HTTP-Method-Override'); }catch{}
+      try{ if(r.body&&r.body.cancel) r.body.cancel(); }catch{}
+      const optsPost={...(opts||{}),method:'POST',headers:{...headers,'X-HTTP-Method-Override':method}};
+      return api(path, optsPost, isRetry, true);
     }
 
     const tag=cacheTag(r);
@@ -994,10 +1062,42 @@ const App = (function() {
     data.tipo_oleo=(data.tipo_oleo||'').trim().toUpperCase()||null;
     if(data.tipo==='TROCA DE ÓLEO'){ if(!data.servico) data.servico='Troca de óleo'; }
     else if(!data.servico){ return alert('Informe o serviço/descrição da manutenção.'); }
+    // v3.8.5 — EDIÇÃO 100% ONLINE. Duas situações que antes faziam a edição
+    // cair em modo offline com o aviso "Sem conexão com a API":
+    //  1) o registro editado ainda NÃO existe no banco (criado neste
+    //     dispositivo quando a API estava fora do ar, ou com id local de
+    //     timestamp > 1e11). Um PATCH nesse id nunca encontraria nada;
+    //  2) o servidor respondeu 404 da própria API (registro apagado em outro
+    //     computador, por exemplo).
+    // Nos dois casos a gravação sai por POST — e, no 404, o POST é repetido
+    // sobre o MESMO caminho, que o servidor resolve como upsert (v3.8.5).
+    const registroEmEdicao=editingMaintenance?maintenances.find(x=>Number(x.id)===Number(editingMaintenance)):null;
+    const edicaoDeRegistroLocal=!!editingMaintenance && (isPendingRecord(registroEmEdicao)||Number(editingMaintenance)>1e11);
+    const usaPatch=!!editingMaintenance && !edicaoDeRegistroLocal;
+    const url=editingMaintenance?`/manutencoes/${editingMaintenance}`:'/manutencoes';
+    const corpo=JSON.stringify(data);
     // SEMPRE tenta a API primeiro (independe da flag online)
     try{
-      const saved=await api(editingMaintenance?`/manutencoes/${editingMaintenance}`:'/manutencoes',{method:editingMaintenance?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-      if(editingMaintenance){const i=maintenances.findIndex(x=>Number(x.id)===editingMaintenance);if(i>=0)maintenances[i]=saved;}
+      let saved;
+      try{
+        saved=await api(url,{method:usaPatch?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:corpo});
+      }catch(e){
+        // 404 DA API num PATCH = o id não existe no banco. Repete por POST (o
+        // servidor grava o registro) em vez de mostrar erro e enfileirar.
+        if(usaPatch && e && e.status===404 && e.doNosso && !isOfflineError(e)){
+          try{ console.warn('[API] PATCH',url,'404 da API → repetindo por POST (upsert)'); }catch{}
+          saved=await api(url,{method:'POST',headers:{'Content-Type':'application/json','X-HTTP-Method-Override':'PATCH'},body:corpo});
+        }else throw e;
+      }
+      // O registro agora está no servidor (e com id real, quando era um id
+      // local). Tira da fila o que ainda apontava para ele — sem isso o flush
+      // repetiria a gravação e o registro apareceria DUPLICADO no banco.
+      if(edicaoDeRegistroLocal && editingMaintenance){
+        const fila=loadQueue();
+        const restante=fila.filter(x=>!((x.op==='create'&&Number(x.localId)===Number(editingMaintenance))||(Number(x.id)===Number(editingMaintenance))));
+        if(restante.length!==fila.length) saveQueue(restante);
+      }
+      if(editingMaintenance){const i=maintenances.findIndex(x=>Number(x.id)===Number(editingMaintenance));if(i>=0)maintenances[i]=saved;else maintenances.unshift(saved);}
       else maintenances.unshift(saved);
       saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
       if(loadQueue().length) flushMaintenanceQueue(); // aproveita para drenar a fila
@@ -1141,14 +1241,42 @@ const App = (function() {
     d.status=(d.status||'ATIVO').toUpperCase();
     if(vehicles.find(x=>x.placa===d.placa&&x.id!==editingVehicle))return alert('Placa já cadastrada');
 
+    // v3.8.5 — EDIÇÃO 100% ONLINE (mesma regra das manutenções):
+    //  • veículo que ainda não existe no banco (cadastrado offline, id local
+    //    >1e11) é gravado por POST em vez de receber um PATCH que devolveria
+    //    404 e derrubaria o app em modo offline;
+    //  • PATCH que responde 404 DA API é repetido por POST no mesmo caminho,
+    //    que o servidor resolve como upsert.
+    const registroEmEdicao=editingVehicle!=null?vehicles.find(x=>Number(x.id)===Number(editingVehicle)):null;
+    const edicaoDeRegistroLocal=editingVehicle!=null && (isPendingRecord(registroEmEdicao)||Number(editingVehicle)>1e11);
+    const usaPatch=editingVehicle!=null && !edicaoDeRegistroLocal;
+    const url=editingVehicle!=null?'/vehicles/'+editingVehicle:'/vehicles';
+    const corpo=JSON.stringify(d);
     // SEMPRE tenta a API primeiro (independe da flag online)
     try{
-      if(editingVehicle){
-        const upd=await api('/vehicles/'+editingVehicle,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
-        const idx=vehicles.findIndex(v=>v.id===editingVehicle); if(idx>=0)vehicles[idx]=upd;
+      let salvo;
+      try{
+        salvo=await api(url,{method:usaPatch?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:corpo});
+      }catch(e){
+        // 404 DA API num PATCH = o veículo não existe no banco: repete por POST
+        // (upsert) em vez de mostrar erro e enfileirar.
+        if(usaPatch && e && e.status===404 && e.doNosso && !isOfflineError(e)){
+          try{ console.warn('[API] PATCH',url,'404 da API → repetindo por POST (upsert)'); }catch{}
+          salvo=await api(url,{method:'POST',headers:{'Content-Type':'application/json','X-HTTP-Method-Override':'PATCH'},body:corpo});
+        }else throw e;
+      }
+      // v3.8.5 — o veículo já está no servidor (com id real, se era local):
+      // remove da fila o que ainda apontava para ele, para o flush não gravar
+      // um SEGUNDO veículo igual.
+      if(edicaoDeRegistroLocal && editingVehicle!=null){
+        const fila=loadVehicleQueue();
+        const restante=fila.filter(x=>!((x.op==='create'&&Number(x.localId)===Number(editingVehicle))||(Number(x.id)===Number(editingVehicle))));
+        if(restante.length!==fila.length) saveVehicleQueue(restante);
+      }
+      if(editingVehicle!=null){
+        const idx=vehicles.findIndex(v=>Number(v.id)===Number(editingVehicle)); if(idx>=0)vehicles[idx]=salvo; else vehicles.push(salvo);
       }else{
-        const novo=await api('/vehicles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
-        vehicles.push(novo);
+        vehicles.push(salvo);
       }
       saveCache(); closeModal('vehicle-modal'); renderVehicles(); renderDashboard(); toast('Veículo salvo!');
       if(loadVehicleQueue().length) flushVehicleQueue(); // aproveita para drenar a fila

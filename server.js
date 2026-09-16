@@ -1,7 +1,7 @@
 'use strict';
 
 // ============================================================
-// FROTA PRO v3.8.3 — Controle de Frota (grupos S2, S3 e S4)
+// FROTA PRO v3.8.5 — Controle de Frota (grupos S2, S3 e S4)
 // Servidor Node nativo: API REST + arquivos estáticos.
 //
 // Persistência:
@@ -50,6 +50,23 @@
 //  • Retentativa automática transparente em falhas transitórias de rede
 //    ou despertar do banco Neon, impedindo falso status offline ao salvar.
 //  • Heartbeat automático e sincronização em segundo plano das filas locais.
+//
+// v3.8.5 — edição SEMPRE online. A edição de um registro caía em modo offline
+// quando o PATCH/PUT não chegava à função (proxy/firewall corporativo que só
+// deixa passar GET e POST, respondendo 405/403) ou quando o id editado não
+// existia no banco (registro criado no dispositivo enquanto estava offline —
+// id local de timestamp > 1e11): a API devolvia 404, o front avisava "Sem
+// conexão com a API" e o registro ia para a fila.
+//  • Resolução de método (reqMethod): aceita o cabeçalho
+//    `X-HTTP-Method-Override` e o parâmetro `?_method=`, permitindo que o front
+//    mande POST onde PATCH/PUT/DELETE são bloqueados.
+//  • As rotas de atualização (/api/manutencoes/:id, /api/vehicles/:id,
+//    /api/trocas-oleo/:id) aceitam PATCH/PUT e também POST com id informado
+//    (no path ou no corpo).
+//  • updateManutencao e updateVehicle viram UPSERT: se o id não existir no
+//    banco, o registro é GRAVADO em vez de devolver 404. Id local (>1e11) não
+//    caberia na coluna INTEGER: o banco atribui o próximo id livre e o front
+//    adota o id devolvido na resposta.
 // ============================================================
 
 const http = require('http');
@@ -63,7 +80,50 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.8.4';
+const VERSION = '3.8.5';
+
+// v3.8.5 — id local "de timestamp" (Date.now(), sempre > 1e11): registro criado
+// no dispositivo enquanto a API estava fora do ar. Ele nunca existiu no banco e
+// nem caberia na coluna INTEGER do Postgres (máximo 2.147.483.647), então
+// consultá-lo só gastaria uma viagem ao Neon (e o Postgres devolveria
+// "value out of range for type integer"). Serve também de critério de upsert:
+// id assim = o registro precisa ser GRAVADO, não procurado.
+const ID_TEMPORARIO_MIN = 1e11;
+function idTemporarioLocal(id) {
+  const n = Number(id);
+  return !Number.isInteger(n) || n < 1 || n > ID_TEMPORARIO_MIN;
+}
+
+// v3.8.5 — método EFETIVO da requisição. Proxies corporativos, firewalls e
+// gateways que só liberam GET/POST respondem 405/403 a PATCH/PUT/DELETE (e
+// alguns reescrevem o método no caminho). Com o override, o front manda POST +
+// `X-HTTP-Method-Override: PATCH` (ou `?_method=PATCH`) e a API executa a
+// operação pedida. Só métodos conhecidos são aceitos: um valor inventado no
+// cabeçalho é ignorado em favor do método real.
+const METODOS_VALIDOS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+function primeiroValor(v) { return Array.isArray(v) ? v[0] : v; }
+function resolveReqMethod(req, requestUrl) {
+  const real = String((req && req.method) || 'GET').toUpperCase();
+  const headers = (req && req.headers) || {};
+  const doCabecalho = String(primeiroValor(headers['x-http-method-override']) || '').trim().toUpperCase();
+  let doQuery = '';
+  try {
+    doQuery = String(primeiroValor(requestUrl.searchParams.get('_method')) || '').trim().toUpperCase();
+  } catch (_) { /* URL sem searchParams: ignora */ }
+  for (const candidato of [doCabecalho, doQuery]) {
+    if (candidato && METODOS_VALIDOS.has(candidato)) return candidato;
+  }
+  return real;
+}
+
+// Id vindo do front: o campo pode chegar como número, string ou ausente.
+function idDoCorpo(body) {
+  if (!body || typeof body !== 'object') return null;
+  const bruto = body.id ?? body._id;
+  if (bruto === null || bruto === undefined || bruto === '') return null;
+  const n = Number(bruto);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
 
 // Tempo máximo de UMA ida ao banco. O driver da Neon fala por HTTP (cada query =
 // 1 fetch) e não tem timeout próprio: com o banco suspenso/lento, a função ficava
@@ -546,7 +606,7 @@ async function completeManutencaoVehicle(data) {
   return data;
 }
 
-async function insertManutencao(body) {
+async function insertManutencao(body, idPreferido = null) {
   const data = await completeManutencaoVehicle(manutencaoData(body));
   if (!data.vehicle_id && !data.placa) {
     const error = new Error('Veículo é obrigatório.');
@@ -559,8 +619,37 @@ async function insertManutencao(body) {
     error.statusCode = 400;
     throw error;
   }
+  // v3.8.5 — id informado = o registro já tem lugar marcado no banco (edição de
+  // algo que não estava lá). Um id local de timestamp (>1e11) NÃO serve: não
+  // caberia na coluna INTEGER, então o banco atribui o próximo id livre e o
+  // front passa a usar o id devolvido na resposta.
+  const idFixo = idTemporarioLocal(idPreferido) ? null : Number(idPreferido);
   if (sql) {
     await ensureNeon();
+    if (idFixo) {
+      // Upsert pelo id: se outro computador gravou o mesmo registro entre a
+      // consulta e o INSERT, o ON CONFLICT atualiza em vez de estourar
+      // "duplicate key value violates unique constraint" na cara do usuário.
+      const rows = await sql`INSERT INTO manutencoes
+        (id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes)
+        VALUES (${idFixo}, ${data.vehicle_id}, ${data.veiculo_id}, ${data.placa}, ${data.tipo}, ${data.data}, ${data.data_saida},
+          ${data.hodometro}, ${data.proxima_manutencao}, ${data.servico}, ${data.itens}, ${data.oficina}, ${data.custo},
+          ${data.status_os}, ${data.tipo_oleo}, ${data.quantidade}, ${data.observacoes})
+        ON CONFLICT (id) DO UPDATE SET
+          vehicle_id = EXCLUDED.vehicle_id, veiculo_id = EXCLUDED.veiculo_id, placa = EXCLUDED.placa,
+          tipo = EXCLUDED.tipo, data = EXCLUDED.data, data_saida = EXCLUDED.data_saida,
+          hodometro = EXCLUDED.hodometro, proxima_manutencao = EXCLUDED.proxima_manutencao,
+          servico = EXCLUDED.servico, itens = EXCLUDED.itens, oficina = EXCLUDED.oficina, custo = EXCLUDED.custo,
+          status_os = EXCLUDED.status_os, tipo_oleo = EXCLUDED.tipo_oleo, quantidade = EXCLUDED.quantidade,
+          observacoes = EXCLUDED.observacoes
+        RETURNING *`;
+      if (!rows[0]) {
+        const error = new Error('A manutenção foi enviada, mas não foi devolvida pelo banco.');
+        error.statusCode = 500;
+        throw error;
+      }
+      return publicManutencao(rows[0]);
+    }
     const row = await retryDuplicateKey(async () => {
       const id = await nextRowId('manutencoes');
       const rows = await sql`INSERT INTO manutencoes
@@ -579,23 +668,41 @@ async function insertManutencao(body) {
     return publicManutencao(row);
   }
   const arr = loadFile().manutencoes;
-  const item = { id: nextId(arr), ...data, created_at: new Date().toISOString() };
+  const idx = idFixo ? arr.findIndex((item) => Number(item.id) === idFixo) : -1;
+  if (idx >= 0) {
+    arr[idx] = { ...arr[idx], ...data, id: arr[idx].id };
+    saveFile();
+    return publicManutencao(arr[idx]);
+  }
+  const item = { id: idFixo || nextId(arr), ...data, created_at: new Date().toISOString() };
   arr.push(item);
   saveFile();
   return publicManutencao(item);
 }
 
 async function updateManutencao(id, body) {
-  let current;
-  if (sql) {
-    await ensureNeon();
-    const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at
-      FROM manutencoes WHERE id = ${id}`;
-    current = rows[0];
-  } else {
-    current = (loadFile().manutencoes || []).find((item) => Number(item.id) === Number(id));
+  const idNum = Number(id);
+  const temporario = idTemporarioLocal(idNum);
+  let current = null;
+  // v3.8.5 — id local (>1e11) nem é procurado: não existe no banco e não
+  // caberia na coluna INTEGER. Vai direto para o upsert abaixo.
+  if (!temporario) {
+    if (sql) {
+      await ensureNeon();
+      const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at
+        FROM manutencoes WHERE id = ${idNum}`;
+      current = rows[0];
+    } else {
+      current = (loadFile().manutencoes || []).find((item) => Number(item.id) === idNum);
+    }
   }
-  if (!current) return null;
+  // v3.8.5 — UPSERT em vez de 404. O id não está no banco (registro lançado em
+  // outro dispositivo que ainda não subiu, apagado por outro computador, ou id
+  // local de timestamp): GRAVA o registro. Antes a resposta era 404, o front
+  // mostrava "Sem conexão com a API" e a edição caía em modo offline — o
+  // usuário digitava e o registro parecia perdido. Um id real é reaproveitado;
+  // um id local recebe o próximo id livre (o front adota o id da resposta).
+  if (!current) return insertManutencao(body || {}, temporario ? null : idNum);
   const merged = await completeManutencaoVehicle(manutencaoData({ ...current, ...(body || {}) }));
   if (!merged.vehicle_id && !merged.placa) {
     const error = new Error('Veículo é obrigatório.');
@@ -615,13 +722,13 @@ async function updateManutencao(id, body) {
       hodometro = ${merged.hodometro}, proxima_manutencao = ${merged.proxima_manutencao},
       servico = ${merged.servico}, itens = ${merged.itens}, oficina = ${merged.oficina}, custo = ${merged.custo},
       status_os = ${merged.status_os}, tipo_oleo = ${merged.tipo_oleo}, quantidade = ${merged.quantidade}, observacoes = ${merged.observacoes}
-      WHERE id = ${id}`;
+      WHERE id = ${idNum}`;
     const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at
-      FROM manutencoes WHERE id = ${id}`;
+      FROM manutencoes WHERE id = ${idNum}`;
     return publicManutencao(rows[0]);
   }
   const arr = loadFile().manutencoes;
-  const index = arr.findIndex((item) => Number(item.id) === Number(id));
+  const index = arr.findIndex((item) => Number(item.id) === idNum);
   arr[index] = { ...arr[index], ...merged, id: arr[index].id };
   saveFile();
   return publicManutencao(arr[index]);
@@ -703,11 +810,30 @@ function sanitizeVehicle(b) {
   };
 }
 
-async function insertVehicle(body) {
+async function insertVehicle(body, idPreferido = null) {
   const d = sanitizeVehicle(body);
   if (!d.placa) { const e = new Error('Placa é obrigatória.'); e.statusCode = 400; throw e; }
+  // v3.8.5 — id informado = o veículo já tem lugar marcado no banco. Id local de
+  // timestamp (>1e11) não cabe na coluna INTEGER: o banco atribui o próximo id
+  // livre e o front adota o id devolvido.
+  const idFixo = idTemporarioLocal(idPreferido) ? null : Number(idPreferido);
   if (sql) {
     await ensureNeon();
+    if (idFixo) {
+      // Upsert pelo id (mesma razão do INSERT de manutenções): outro computador
+      // pode ter cadastrado o mesmo registro entre a consulta e a gravação.
+      const rows = await sql`INSERT INTO vehicles (id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade)
+        VALUES (${idFixo}, ${d.placa}, ${d.grupo}, ${d.marca}, ${d.modelo}, ${d.ano}, ${d.cor}, ${d.hodometro}, ${d.status}, ${d.combustivel}, ${d.capacidade})
+        ON CONFLICT (id) DO UPDATE SET
+          placa = EXCLUDED.placa, grupo = EXCLUDED.grupo, marca = EXCLUDED.marca, modelo = EXCLUDED.modelo,
+          ano = EXCLUDED.ano, cor = EXCLUDED.cor, hodometro = EXCLUDED.hodometro,
+          status = EXCLUDED.status, combustivel = EXCLUDED.combustivel, capacidade = EXCLUDED.capacidade
+        RETURNING id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade`;
+      if (rows[0]) return rows[0];
+      const error = new Error('O veículo foi enviado, mas não foi devolvido pelo banco.');
+      error.statusCode = 500;
+      throw error;
+    }
     const salvo = await retryDuplicateKey(async () => {
       const nid = await nextRowId('vehicles');
       const rows = await sql`INSERT INTO vehicles (id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade)
@@ -718,7 +844,13 @@ async function insertVehicle(body) {
     return salvo;
   }
   const arr = loadFile().vehicles;
-  const novo = { id: nextId(arr), ...d };
+  const idx = idFixo ? arr.findIndex((v) => Number(v.id) === idFixo) : -1;
+  if (idx >= 0) {
+    arr[idx] = { ...arr[idx], ...d, id: arr[idx].id };
+    saveFile();
+    return arr[idx];
+  }
+  const novo = { id: idFixo || nextId(arr), ...d };
   arr.push(novo);
   saveFile();
   return novo;
@@ -726,6 +858,8 @@ async function insertVehicle(body) {
 
 async function updateVehicle(id, body) {
   body = body || {};
+  const idNum = Number(id);
+  const temporario = idTemporarioLocal(idNum);
   // PATCH parcial: só altera os campos enviados
   const sets = {};
   if (body.placa !== undefined) sets.placa = String(body.placa).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
@@ -738,21 +872,27 @@ async function updateVehicle(id, body) {
   if (body.status !== undefined) sets.status = String(body.status || 'ATIVO').toUpperCase();
   if (body.combustivel !== undefined) sets.combustivel = body.combustivel ? String(body.combustivel).toUpperCase() : null;
   if (body.capacidade !== undefined) sets.capacidade = intOrNull(body.capacidade);
+  // v3.8.5 — id local (>1e11, criado neste dispositivo enquanto estava sem
+  // conexão) não existe no banco: grava em vez de responder 404 → antes isso
+  // deixava a edição em modo offline e o veículo parecia perdido.
+  if (temporario) return insertVehicle(body, null);
   if (sql) {
     await ensureNeon();
-    const cur = await sql`SELECT id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade FROM vehicles WHERE id = ${id}`;
-    if (cur.length === 0) return null;
+    const cur = await sql`SELECT id, placa, grupo, marca, modelo, ano, cor, hodometro, status, combustivel, capacidade FROM vehicles WHERE id = ${idNum}`;
+    // v3.8.5 — UPSERT: o id não está no banco. Grava com esse mesmo id, para a
+    // edição do usuário não virar 404 (e o front não cair em modo offline).
+    if (cur.length === 0) return insertVehicle(body, idNum);
     const m = { ...cur[0], ...sets };
     await sql`UPDATE vehicles SET
       placa = ${m.placa}, grupo = ${m.grupo}, marca = ${m.marca}, modelo = ${m.modelo},
       ano = ${m.ano}, cor = ${m.cor}, hodometro = ${m.hodometro},
       status = ${m.status}, combustivel = ${m.combustivel}, capacidade = ${m.capacidade}
-      WHERE id = ${id}`;
+      WHERE id = ${idNum}`;
     return m;
   }
   const arr = loadFile().vehicles;
-  const idx = arr.findIndex((v) => Number(v.id) === Number(id));
-  if (idx === -1) return null;
+  const idx = arr.findIndex((v) => Number(v.id) === idNum);
+  if (idx === -1) return insertVehicle(body, idNum); // upsert
   arr[idx] = { ...arr[idx], ...sets, id: arr[idx].id };
   saveFile();
   return arr[idx];
@@ -961,6 +1101,13 @@ const ECHO_BODY_TIMEOUT = Symbol('echo-body-timeout');
 async function echoDiagnostics(req, requestUrl) {
   const h = req.headers || {};
   const get = (name) => (h[name] === undefined ? null : h[name]);
+  // v3.8.5 — além do método que CHEGOU (req.method, que é o que este espelho
+  // existe para mostrar), informa qual método a API vai EXECUTAR: o override
+  // (X-HTTP-Method-Override / ?_method=) muda o comportamento sem mudar o que a
+  // rede entregou.
+  const reqMethod = resolveReqMethod(req, requestUrl);
+  const overrideCabecalho = get('x-http-method-override');
+  const overrideQuery = requestUrl.searchParams.get('_method');
 
   // Só os cabeçalhos que denunciam intermediários no caminho.
   const proxyHeaders = {};
@@ -1055,6 +1202,12 @@ async function echoDiagnostics(req, requestUrl) {
     o_que_e: 'JSON gerado pela própria API (server.js). Se isto não aparecer, a resposta veio de outra coisa — proxy, cache da rede, firewall ou página da plataforma.',
     recebido: {
       metodo: req.method,
+      metodo_efetivo: reqMethod,
+      metodo_override: {
+        cabecalho_x_http_method_override: overrideCabecalho ? String(primeiroValor(overrideCabecalho)) : null,
+        query_method: overrideQuery || null,
+        usado: reqMethod !== String(req.method || 'GET').toUpperCase()
+      },
       path: requestUrl.pathname,
       query_string: requestUrl.search || '',
       query: Object.fromEntries(requestUrl.searchParams.entries()),
@@ -1156,14 +1309,21 @@ function apiError(res, req, pathname, e) {
   if (code === 500 && /connecting to database|tempo esgotado ao falar com o banco|fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test([e && e.message, motivo].filter(Boolean).join(' '))) {
     code = 504;
   }
+  // v3.8.5 — o log mostra o método EFETIVO (o override vale) e, entre
+  // parênteses, o método que a rede entregou quando são diferentes: sem isso,
+  // um POST + X-HTTP-Method-Override: PATCH apareceria como POST no log e
+  // esconderia a operação que realmente falhou.
+  const metodoLog = (req && req._reqMethod) || req.method;
+  const metodoRede = req && req.method;
+  const marcaMetodo = metodoLog !== metodoRede ? `${metodoLog}<-${metodoRede}` : metodoLog;
   if (code >= 500) {
-    console.error(`[API] ${req.method} ${pathname} → ${motivo}${sqlstate ? ` (sqlstate ${sqlstate})` : ''}${took}`);
+    console.error(`[API] ${marcaMetodo} ${pathname} → ${motivo}${sqlstate ? ` (sqlstate ${sqlstate})` : ''}${took}`);
     if (process.env.API_DEBUG === '1') console.error(e);
     return json(res, code, { error: `Erro no servidor: ${motivo}`, sqlstate: sqlstate || undefined });
   }
   // 4xx também vão para o log: uma epidemia de "Veículo é obrigatório." sem pista
   // no log é impossível de diagnosticar à distância.
-  console.warn(`[API] ${req.method} ${pathname} → ${code} ${motivo}${took}`);
+  console.warn(`[API] ${marcaMetodo} ${pathname} → ${code} ${motivo}${took}`);
   return json(res, code, { error: motivo });
 }
 
@@ -1184,7 +1344,9 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': '
 async function handleRequest(req, res) {
   req._t0 = Date.now();
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Cache-Control': 'no-store' });
+    // v3.8.5 — o preflight libera o cabeçalho de override: é ele que permite
+    // enviar POST onde a rede bloqueia PATCH/PUT/DELETE.
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-HTTP-Method-Override', 'Cache-Control': 'no-store' });
     return res.end();
   }
   const host = req.headers.host || 'localhost';
@@ -1211,12 +1373,22 @@ async function handleRequest(req, res) {
 
   const query = Object.fromEntries(requestUrl.searchParams.entries());
 
+  // v3.8.5 — método EFETIVO: X-HTTP-Method-Override / ?_method= têm precedência
+  // sobre o método que chegou (o front usa isso quando a rede bloqueia
+  // PATCH/PUT/DELETE com 405/403). `req.method` continua sendo o que a rede
+  // entregou — é ele que o /api/echo mostra.
+  const reqMethod = resolveReqMethod(req, requestUrl);
+  req._reqMethod = reqMethod; // usado no log da API (apiError)
+
   try {
     if (pathname === '/api' || pathname.startsWith('/api/')) {
       const cleanPath = pathname.replace(/^\/api\/?/, '');
       const parts = cleanPath.split('/').filter(Boolean);
       const resource = parts[0] || 'status';
-      const id = parts[1] ? parseInt(parts[1], 10) : null;
+      const idBruto = parts[1] ? parseInt(parts[1], 10) : null;
+      // id inválido no caminho (texto, zero, negativo) é tratado como "sem id":
+      // nunca vira um alvo de UPDATE/DELETE sem sentido.
+      const id = Number.isInteger(idBruto) && idBruto > 0 ? idBruto : null;
 
       // v3.8.1 — espelho da rede. Aceita QUALQUER método de propósito: se a
       // rede trocar POST por GET no caminho, este JSON mostra o método que
@@ -1230,14 +1402,14 @@ async function handleRequest(req, res) {
         const manutencoes = await listManutencoes();
         return json(res, 200, { online: true, version: VERSION, db: sql ? 'neon' : 'file', counts: { vehicles: vehicles.length, manutencoes: manutencoes.length, trocas_oleo: manutencoes.filter((m) => m.tipo === 'TROCA DE ÓLEO').length } });
       }
-      if (resource === 'data' && req.method === 'GET') {
+      if (resource === 'data' && reqMethod === 'GET') {
         return json(res, 200, { vehicles: await listVehicles(), users: (await listUsers()).map(stripSenha) });
       }
-      if (resource === 'seed' && req.method === 'POST') {
+      if (resource === 'seed' && reqMethod === 'POST') {
         await seedVehicles();
         return json(res, 200, { success: true });
       }
-      if (resource === 'login' && req.method === 'POST') {
+      if (resource === 'login' && reqMethod === 'POST') {
         const body = await parseBody(req);
         const user = await checkLogin(body.usuario, body.senha);
         if (!user) return json(res, 401, { error: 'Usuário ou senha incorretos.' });
@@ -1245,79 +1417,100 @@ async function handleRequest(req, res) {
       }
 
       if (resource === 'trocas-oleo' || resource === 'oil-changes') {
-        if (req.method === 'GET' && (parts[1] === 'relatorio' || parts[1] === 'relatorio-mensal')) {
+        if (reqMethod === 'GET' && (parts[1] === 'relatorio' || parts[1] === 'relatorio-mensal')) {
           return json(res, 200, await monthlyOilReport(query));
         }
-        if (req.method === 'GET' && !id) return json(res, 200, await listOilChanges(query));
-        if (req.method === 'GET' && id) {
+        if (reqMethod === 'GET' && !id) return json(res, 200, await listOilChanges(query));
+        if (reqMethod === 'GET' && id) {
           const all = await listOilChanges();
           const item = all.find((change) => Number(change.id) === id);
           return item ? json(res, 200, item) : json(res, 404, { error: 'Not found' });
         }
-        if (req.method === 'POST') return json(res, 201, await insertOilChange(await parseBody(req)));
-        if ((req.method === 'PATCH' || req.method === 'PUT') && id) {
-          const upd = await updateOilChange(id, await parseBody(req));
-          return upd ? json(res, 200, upd) : json(res, 404, { error: 'Not found' });
+        // v3.8.5 — gravação/edição: POST insere; PATCH/PUT (e POST com o id
+        // informado no path ou no corpo) ATUALIZAM — e o update é upsert, então
+        // um id que não está no banco é gravado em vez de devolver 404.
+        if (reqMethod === 'POST' || reqMethod === 'PATCH' || reqMethod === 'PUT') {
+          const corpo = await parseBody(req);
+          const alvo = id || idDoCorpo(corpo);
+          if (alvo) {
+            const upd = await updateOilChange(alvo, corpo);
+            return upd ? json(res, 200, upd) : json(res, 201, await insertOilChange(corpo));
+          }
+          if (reqMethod === 'POST') return json(res, 201, await insertOilChange(corpo));
         }
-        if (req.method === 'DELETE' && id) {
+        if (reqMethod === 'DELETE' && id) {
           return (await deleteOilChange(id)) ? json(res, 200, { success: true }) : json(res, 404, { error: 'Not found' });
         }
         return json(res, 405, { error: 'Method not allowed' });
       }
 
-      if (resource === 'relatorio-mensal' && req.method === 'GET') {
+      if (resource === 'relatorio-mensal' && reqMethod === 'GET') {
         return json(res, 200, await monthlyOilReport(query));
       }
 
       if (resource === 'manutencoes' || resource === 'manutencao') {
-        if (req.method === 'GET' && !id) return json(res, 200, await listManutencoes(query));
-        if (req.method === 'GET' && id) {
+        if (reqMethod === 'GET' && !id) return json(res, 200, await listManutencoes(query));
+        if (reqMethod === 'GET' && id) {
           const all = await listManutencoes();
           const item = all.find((m) => Number(m.id) === id);
           return item ? json(res, 200, item) : json(res, 404, { error: 'Not found' });
         }
-        if (req.method === 'POST') return json(res, 201, await insertManutencao(await parseBody(req)));
-        if ((req.method === 'PATCH' || req.method === 'PUT') && id) {
-          const upd = await updateManutencao(id, await parseBody(req));
-          return upd ? json(res, 200, upd) : json(res, 404, { error: 'Not found' });
+        // v3.8.5 — edição à prova de rede: PATCH/PUT atualizam; POST também
+        // atualiza quando o id vem informado (path ou corpo), o que cobre o
+        // POST + X-HTTP-Method-Override: PATCH usado quando a rede bloqueia o
+        // método real. POST sem id continua sendo criação (201).
+        if (reqMethod === 'POST' || reqMethod === 'PATCH' || reqMethod === 'PUT') {
+          const corpo = await parseBody(req);
+          const alvo = id || idDoCorpo(corpo);
+          if (alvo) {
+            const upd = await updateManutencao(alvo, corpo);
+            return upd ? json(res, 200, upd) : json(res, 201, await insertManutencao(corpo));
+          }
+          if (reqMethod === 'POST') return json(res, 201, await insertManutencao(corpo));
         }
-        if (req.method === 'DELETE' && id) {
+        if (reqMethod === 'DELETE' && id) {
           return (await deleteManutencao(id)) ? json(res, 200, { success: true }) : json(res, 404, { error: 'Not found' });
         }
         return json(res, 405, { error: 'Method not allowed' });
       }
 
       if (resource === 'vehicles') {
-        if (req.method === 'GET' && !id) return json(res, 200, await listVehicles());
-        if (req.method === 'GET' && id) {
+        if (reqMethod === 'GET' && !id) return json(res, 200, await listVehicles());
+        if (reqMethod === 'GET' && id) {
           const all = await listVehicles();
           const it = all.find((v) => Number(v.id) === id);
           return it ? json(res, 200, it) : json(res, 404, { error: 'Not found' });
         }
-        if (req.method === 'POST') return json(res, 201, await insertVehicle(await parseBody(req)));
-        if ((req.method === 'PATCH' || req.method === 'PUT') && id) {
-          const upd = await updateVehicle(id, await parseBody(req));
-          return upd ? json(res, 200, upd) : json(res, 404, { error: 'Not found' });
+        // v3.8.5 — idem manutenções: PATCH/PUT e POST com id informado são
+        // atualização (upsert); POST sem id é cadastro.
+        if (reqMethod === 'POST' || reqMethod === 'PATCH' || reqMethod === 'PUT') {
+          const corpo = await parseBody(req);
+          const alvo = id || idDoCorpo(corpo);
+          if (alvo) {
+            const upd = await updateVehicle(alvo, corpo);
+            return upd ? json(res, 200, upd) : json(res, 201, await insertVehicle(corpo));
+          }
+          if (reqMethod === 'POST') return json(res, 201, await insertVehicle(corpo));
         }
-        if (req.method === 'DELETE' && id) {
+        if (reqMethod === 'DELETE' && id) {
           return (await deleteVehicle(id)) ? json(res, 200, { success: true }) : json(res, 404, { error: 'Not found' });
         }
         return json(res, 405, { error: 'Method not allowed' });
       }
 
       if (resource === 'users') {
-        if (req.method === 'GET' && !id) return json(res, 200, (await listUsers()).map(stripSenha));
-        if (req.method === 'GET' && id) {
+        if (reqMethod === 'GET' && !id) return json(res, 200, (await listUsers()).map(stripSenha));
+        if (reqMethod === 'GET' && id) {
           const all = await listUsers();
           const it = all.find((x) => Number(x.id) === id);
           return it ? json(res, 200, stripSenha(it)) : json(res, 404, { error: 'Not found' });
         }
-        if (req.method === 'POST') return json(res, 201, await insertUser(await parseBody(req)));
-        if ((req.method === 'PATCH' || req.method === 'PUT') && id) {
+        if (reqMethod === 'POST') return json(res, 201, await insertUser(await parseBody(req)));
+        if ((reqMethod === 'PATCH' || reqMethod === 'PUT') && id) {
           const upd = await updateUser(id, await parseBody(req));
           return upd ? json(res, 200, upd) : json(res, 404, { error: 'Not found' });
         }
-        if (req.method === 'DELETE' && id) {
+        if (reqMethod === 'DELETE' && id) {
           return (await deleteUser(id)) ? json(res, 200, { success: true }) : json(res, 404, { error: 'Not found' });
         }
         return json(res, 405, { error: 'Method not allowed' });
