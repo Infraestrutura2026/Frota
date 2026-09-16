@@ -70,7 +70,7 @@ const App = (function() {
     return `<span class="placa-band" aria-hidden="true">BRASIL</span><span class="placa-chars">${t}</span>`;
   }
   function currentOilMonth(){ return document.getElementById('oil-month-filter')?.value || new Date().toISOString().slice(0,7); }
-  function oilRecords(){ return maintenances.filter(m => (m.tipo||'').toUpperCase()==='TROCA DE ÓLEO'); }
+  function oilRecords(){ return dedupeById(maintenances).filter(m => (m.tipo||'').toUpperCase()==='TROCA DE ÓLEO'); }
 
   function toast(msg, tipo){
     const c=document.getElementById('toast-container'); if(!c)return;
@@ -80,14 +80,14 @@ const App = (function() {
   }
 
   // ---------- Cache local (espelho para modo offline) ----------
-  function saveCache(){ try{localStorage.setItem('frota_vehicles',JSON.stringify(vehicles));}catch{} }
+  function saveCache(){ try{vehicles=dedupeById(vehicles);localStorage.setItem('frota_vehicles',JSON.stringify(vehicles));}catch{} }
   function loadCache(){
-    try{vehicles=JSON.parse(localStorage.getItem('frota_vehicles')||'[]');}catch{vehicles=[];}
+    try{vehicles=dedupeById(JSON.parse(localStorage.getItem('frota_vehicles')||'[]'));}catch{vehicles=[];}
     if(!Array.isArray(vehicles)||vehicles.length===0){vehicles=VEHICLES.map((v,i)=>({...v,id:i+1})); saveCache();}
   }
-  function saveMaintCache(){ try{localStorage.setItem('frota_manutencoes',JSON.stringify(maintenances));}catch{} }
+  function saveMaintCache(){ try{maintenances=dedupeById(maintenances);localStorage.setItem('frota_manutencoes',JSON.stringify(maintenances));}catch{} }
   function readMaintCache(){
-    try{const arr=JSON.parse(localStorage.getItem('frota_manutencoes')||'[]');return Array.isArray(arr)?arr:[];}catch{return[];}
+    try{const arr=JSON.parse(localStorage.getItem('frota_manutencoes')||'[]');return dedupeById(arr);}catch{return[];}
   }
   function loadMaintCache(){ maintenances=readMaintCache(); }
 
@@ -107,6 +107,22 @@ const App = (function() {
 
   // Registro criado/alterado enquanto offline: id de timestamp (>1e11) ou flag _pending
   function isPendingRecord(m){ return !!m&&(m._pending===true||(m.id!=null&&Number(m.id)>1e11)); }
+
+  // v3.8.7 — a API devolve um único id, mas uma resposta de edição pode
+  // concorrer com o cache/fila local e deixar duas cópias do mesmo registro no
+  // array exibido pelo navegador. A primeira ocorrência vence: os caminhos de
+  // edição colocam o registro salvo com unshift antes de deduplicar.
+  function dedupeById(items){
+    const seen=new Set();
+    return (Array.isArray(items)?items:[]).filter(item=>{
+      if(!item||item.id===undefined||item.id===null||item.id==='')return true;
+      const n=Number(item.id);
+      const key=Number.isFinite(n)?String(n):String(item.id);
+      if(seen.has(key))return false;
+      seen.add(key);
+      return true;
+    });
+  }
 
   function readVehicleCache(){
     try{const arr=JSON.parse(localStorage.getItem('frota_vehicles')||'[]');return Array.isArray(arr)?arr:[];}catch{return[];}
@@ -176,13 +192,13 @@ const App = (function() {
                 saved=await api(url,{method:'POST',headers:{'Content-Type':'application/json','X-HTTP-Method-Override':'PATCH'},body:corpo});
               }else throw e;
             }
-            if(item.op==='create'){
-              const i=maintenances.findIndex(x=>Number(x.id)===Number(item.localId));
-              if(i>=0)maintenances[i]=saved; else maintenances.unshift(saved);
-            }else{
-              const i=maintenances.findIndex(x=>Number(x.id)===Number(item.id));
-              if(i>=0)maintenances[i]={...maintenances[i],...saved,_pending:false};
-            }
+            // v3.8.7 — remove tanto o id local/editado quanto o id devolvido
+            // pela API antes de colocar a versão salva no início. Assim o flush
+            // não deixa a cópia antiga ao lado da cópia atualizada.
+            const idAnterior=item.op==='create'?item.localId:item.id;
+            maintenances=maintenances.filter(x=>Number(x.id)!==Number(idAnterior)&&Number(x.id)!==Number(saved?.id));
+            maintenances.unshift(saved);
+            maintenances=dedupeById(maintenances);
           }
           const after=loadQueue(); after.shift(); saveQueue(after);
           saveMaintCache(); synced=true;
@@ -226,13 +242,12 @@ const App = (function() {
                 saved=await api(url,{method:'POST',headers:{'Content-Type':'application/json','X-HTTP-Method-Override':'PATCH'},body:corpo});
               }else throw e;
             }
-            if(item.op==='create'){
-              const i=vehicles.findIndex(x=>Number(x.id)===Number(item.localId));
-              if(i>=0)vehicles[i]=saved; else vehicles.push(saved);
-            }else{
-              const i=vehicles.findIndex(x=>Number(x.id)===Number(item.id));
-              if(i>=0)vehicles[i]={...vehicles[i],...saved,_pending:false};
-            }
+            // v3.8.7 — mesma proteção das manutenções: o flush pode encontrar
+            // a cópia local e uma resposta já inserida no array.
+            const idAnterior=item.op==='create'?item.localId:item.id;
+            vehicles=vehicles.filter(x=>Number(x.id)!==Number(idAnterior)&&Number(x.id)!==Number(saved?.id));
+            vehicles.unshift(saved);
+            vehicles=dedupeById(vehicles);
           }
           const after=loadVehicleQueue(); after.shift(); saveVehicleQueue(after);
           saveCache(); synced=true;
@@ -470,7 +485,7 @@ const App = (function() {
     let fromServer=null;
     try{
       fromServer=await api('/vehicles');
-      vehicles=fromServer;
+      vehicles=dedupeById(fromServer);
       online=true; saveCache(); setConnStatus(true);
     }catch(e){
       if(isOfflineError(e)){ online=false; setConnStatus(false); }
@@ -495,7 +510,7 @@ const App = (function() {
     let fromServer=null;
     try{
       fromServer=await api('/manutencoes');
-      maintenances=fromServer;
+      maintenances=dedupeById(fromServer);
       saveMaintCache();
     }catch(e){
       if(isOfflineError(e)){ online=false; setConnStatus(false); }
@@ -721,6 +736,8 @@ const App = (function() {
   }
 
   function renderDashboard(){
+    vehicles=dedupeById(vehicles);
+    maintenances=dedupeById(maintenances);
     renderDashGroups();
     const total=vehicles.length, act=vehicles.filter(v=>(v.status||'').toUpperCase()==='ATIVO').length, man=vehicles.filter(v=>(v.status||'').toUpperCase()==='MANUTENÇÃO').length;
     const aP=total>0?Math.round(act/total*100):0, mP=total>0?Math.round(man/total*100):0, oP=100-aP-mP;
@@ -764,7 +781,7 @@ const App = (function() {
       const rows=await api('/manutencoes?vehicle_id='+encodeURIComponent(id));
       if(Number(historyVehicle)!==Number(id))return; // o usuário abriu outro veículo
       const pendentes=maintenances.filter(m=>Number(m.vehicle_id)===Number(id)&&isPendingRecord(m));
-      maintenances=maintenances.filter(m=>Number(m.vehicle_id)!==Number(id)).concat(rows,pendentes);
+      maintenances=dedupeById(maintenances.filter(m=>Number(m.vehicle_id)!==Number(id)).concat(rows,pendentes));
       saveMaintCache();
     }catch(e){ /* sem API: mantém o cache local já exibido */ }
     finally{
@@ -783,7 +800,7 @@ const App = (function() {
   function historyAllItems(){
     const v=vehicles.find(x=>Number(x.id)===Number(historyVehicle));
     if(!v)return [];
-    return maintenances.filter(m=>Number(m.vehicle_id)===Number(v.id));
+    return dedupeById(maintenances).filter(m=>Number(m.vehicle_id)===Number(v.id));
   }
   function historyItems(){
     return historyAllItems()
@@ -895,6 +912,7 @@ const App = (function() {
   }
 
   function renderVehicleHistory(){
+    maintenances=dedupeById(maintenances);
     const titleEl=document.getElementById('vehicle-history-title');
     const content=document.getElementById('vehicle-history-content');
     if(!titleEl||!content)return;
@@ -956,6 +974,7 @@ const App = (function() {
   }
 
   function renderVehicles(){
+    vehicles=dedupeById(vehicles);
     const search=(document.getElementById('vehicle-search')?.value||'').toLowerCase();
     const filter=document.getElementById('vehicle-status-filter')?.value||'';
     const filt=vehicles.filter(v=>`${v.placa} ${v.marca} ${v.modelo}`.toLowerCase().includes(search)&&(!filter||(v.status||'').toUpperCase()===filter));
@@ -970,6 +989,7 @@ const App = (function() {
   // ============ MANUTENÇÃO ============
 
   function renderMaintenance(){
+    maintenances=dedupeById(maintenances);
     const search=(document.getElementById('maint-search')?.value||'').toLowerCase();
     const tipo=(document.getElementById('maint-tipo-filter')?.value||'').toUpperCase();
     const status=(document.getElementById('maint-status-filter')?.value||'').toUpperCase();
@@ -1095,8 +1115,12 @@ const App = (function() {
         const restante=fila.filter(x=>!((x.op==='create'&&Number(x.localId)===Number(editingMaintenance))||(Number(x.id)===Number(editingMaintenance))));
         if(restante.length!==fila.length) saveQueue(restante);
       }
-      if(editingMaintenance){const i=maintenances.findIndex(x=>Number(x.id)===Number(editingMaintenance));if(i>=0)maintenances[i]=saved;else maintenances.unshift(saved);}
-      else maintenances.unshift(saved);
+      // v3.8.7 — uma edição substitui todas as cópias do id editado e também
+      // qualquer cópia do id devolvido pela API, depois coloca a resposta nova
+      // no início. O banco continua com um único registro; a defesa é no front.
+      maintenances=maintenances.filter(x=>Number(x.id)!==Number(editingMaintenance)&&Number(x.id)!==Number(saved?.id));
+      maintenances.unshift(saved);
+      maintenances=dedupeById(maintenances);
       saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
       if(loadQueue().length) flushMaintenanceQueue(); // aproveita para drenar a fila
       toast(data.tipo==='TROCA DE ÓLEO'?'Troca de óleo salva!':'Manutenção salva!'); return;
@@ -1110,11 +1134,14 @@ const App = (function() {
     let local;
     if(existing){
       local={...existing,...data,_pending:true,_op:wasPending?'create':'update'};
-      const i=maintenances.findIndex(x=>Number(x.id)===Number(editingMaintenance)); if(i>=0)maintenances[i]=local;
+      maintenances=maintenances.filter(x=>Number(x.id)!==Number(editingMaintenance));
+      maintenances.unshift(local);
     }else{
       local={...data,id:Date.now(),placa:vehicles.find(v=>Number(v.id)===Number(data.vehicle_id))?.placa||null,data_entrada:data.data,_pending:true,_op:'create'};
+      maintenances=maintenances.filter(x=>Number(x.id)!==Number(local.id));
       maintenances.unshift(local);
     }
+    maintenances=dedupeById(maintenances);
     const q=loadQueue();
     const entry=local._op==='update'
       ?{op:'update',id:local.id,payload:maintenancePayload(local)}
@@ -1183,6 +1210,7 @@ const App = (function() {
   // ============ TROCA DE ÓLEO (visão ligada à Manutenção) ============
 
   function renderOilChanges(){
+    maintenances=dedupeById(maintenances);
     const monthEl=document.getElementById('oil-month-filter');
     const month=monthEl?.value||'';
     const search=(document.getElementById('oil-search')?.value||'').toLowerCase().trim();
@@ -1237,7 +1265,7 @@ const App = (function() {
     d.placa=d.placa.toUpperCase().replace(/[^A-Z0-9]/g,'');
     d.hodometro=parseInt(d.hodometro)||0; d.ano=parseInt(d.ano)||null; d.capacidade=parseInt(d.capacidade)||null;
     d.status=(d.status||'ATIVO').toUpperCase();
-    if(vehicles.find(x=>x.placa===d.placa&&x.id!==editingVehicle))return alert('Placa já cadastrada');
+    if(vehicles.find(x=>x.placa===d.placa&&Number(x.id)!==Number(editingVehicle)))return alert('Placa já cadastrada');
 
     // v3.8.5 — EDIÇÃO 100% ONLINE (mesma regra das manutenções):
     //  • veículo que ainda não existe no banco (cadastrado offline, id local
@@ -1271,11 +1299,11 @@ const App = (function() {
         const restante=fila.filter(x=>!((x.op==='create'&&Number(x.localId)===Number(editingVehicle))||(Number(x.id)===Number(editingVehicle))));
         if(restante.length!==fila.length) saveVehicleQueue(restante);
       }
-      if(editingVehicle!=null){
-        const idx=vehicles.findIndex(v=>Number(v.id)===Number(editingVehicle)); if(idx>=0)vehicles[idx]=salvo; else vehicles.push(salvo);
-      }else{
-        vehicles.push(salvo);
-      }
+      // v3.8.7 — substitui todas as cópias do id antigo e do id devolvido
+      // pela API antes de inserir a resposta atualizada.
+      vehicles=vehicles.filter(v=>Number(v.id)!==Number(editingVehicle)&&Number(v.id)!==Number(salvo?.id));
+      vehicles.unshift(salvo);
+      vehicles=dedupeById(vehicles);
       saveCache(); closeModal('vehicle-modal'); renderVehicles(); renderDashboard(); toast('Veículo salvo!');
       if(loadVehicleQueue().length) flushVehicleQueue(); // aproveita para drenar a fila
       return;
@@ -1287,15 +1315,18 @@ const App = (function() {
     // Fallback local: salva no dispositivo E enfileira para sincronizar depois
     const q=loadVehicleQueue();
     if(editingVehicle){
-      const idx=vehicles.findIndex(v=>v.id===editingVehicle);
-      if(idx>=0)vehicles[idx]={...vehicles[idx],...d,_pending:true,_op:'update'};
+      const atual=vehicles.find(v=>Number(v.id)===Number(editingVehicle));
+      const local={...(atual||{}),...d,id:editingVehicle,_pending:true,_op:'update'};
+      vehicles=vehicles.filter(v=>Number(v.id)!==Number(editingVehicle));
+      vehicles.unshift(local);
       const entry={op:'update',id:editingVehicle,payload:vehiclePayload(d)};
       const qi=q.findIndex(x=>x.op==='update'&&Number(x.id)===Number(editingVehicle));
       if(qi>=0)q[qi]=entry; else q.push(entry);
       saveVehicleQueue(q);
     }else{
       const local={...d,id:Date.now(),_pending:true,_op:'create'};
-      vehicles.push(local);
+      vehicles=vehicles.filter(v=>Number(v.id)!==Number(local.id));
+      vehicles.unshift(local);
       const entry={op:'create',localId:local.id,payload:vehiclePayload(local)};
       const qi=q.findIndex(x=>x.op==='create'&&Number(x.localId)===Number(local.id));
       if(qi>=0)q[qi]=entry; else q.push(entry);
