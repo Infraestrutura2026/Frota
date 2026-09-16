@@ -136,15 +136,20 @@ no banco.
 | GET          | `/api/vehicles`     | Lista veículos                 |
 | GET          | `/api/vehicles/:id` | Busca um veículo               |
 | POST         | `/api/vehicles`     | Cadastra um veículo            |
-| PATCH/PUT    | `/api/vehicles/:id` | Atualiza um veículo            |
+| PATCH/PUT    | `/api/vehicles/:id` | Atualiza um veículo (upsert: id inexistente é gravado) |
+| POST         | `/api/vehicles/:id` | Atualiza um veículo (equivale a PATCH/PUT; aceita `X-HTTP-Method-Override` / `?_method=`) |
 | DELETE       | `/api/vehicles/:id` | Exclui um veículo              |
 | idem         | `/api/users`        | Mesmas operações p/ usuários   |
 | GET          | `/api/manutencoes`  | Lista manutenções (filtros: `tipo`, `status_os`, `mes`, `ano`, `q`, `placa`, `vehicle_id`) |
-| POST         | `/api/manutencoes`  | Registra uma manutenção / ordem de serviço |
-| PATCH/DELETE | `/api/manutencoes/:id` | Edita/exclui um registro    |
+| POST         | `/api/manutencoes`  | Registra uma manutenção / ordem de serviço (com `id` no corpo, atualiza) |
+| PATCH/PUT    | `/api/manutencoes/:id` | Edita um registro (upsert: id inexistente é gravado) |
+| POST         | `/api/manutencoes/:id` | Edita um registro (equivale a PATCH/PUT; aceita `X-HTTP-Method-Override` / `?_method=`) |
+| DELETE       | `/api/manutencoes/:id` | Exclui um registro          |
 | GET          | `/api/trocas-oleo`  | Lista trocas de óleo (= manutenções do tipo `TROCA DE ÓLEO`) |
-| POST         | `/api/trocas-oleo`  | Registra uma troca de óleo     |
-| PATCH/DELETE | `/api/trocas-oleo/:id` | Edita/exclui um registro    |
+| POST         | `/api/trocas-oleo`  | Registra uma troca de óleo (com `id` no corpo, atualiza) |
+| PATCH/PUT    | `/api/trocas-oleo/:id` | Edita um registro (upsert: id inexistente é gravado) |
+| POST         | `/api/trocas-oleo/:id` | Edita um registro (equivale a PATCH/PUT; aceita `X-HTTP-Method-Override` / `?_method=`) |
+| DELETE       | `/api/trocas-oleo/:id` | Exclui um registro          |
 | GET          | `/api/trocas-oleo/relatorio-mensal` | Relatório mensal |
 
 > 🔒 Senhas ficam hasheadas (SHA-256) e nunca são retornadas pela API.
@@ -257,3 +262,12 @@ no banco.
 > - **Heartbeat automático em segundo plano**: verificação periódica a cada 10s (em offline) ou 30s (em online) que detecta a volta da API e drena as filas pendentes (`flushMaintenanceQueue` e `flushVehicleQueue`) sem intervenção manual;
 > - **Reconexão imediata por eventos**: reconexão e sincronização instantâneas ao detectar sinal de rede no navegador (`window online`) ou quando o usuário volta para a aba (`visibilitychange`);
 > - **Badge de status interativo**: o indicador `● Offline` / `● Online` agora é clicável e exibe a quantidade de registros pendentes (`● Offline (1 pendente)`). Clicar no badge força teste imediato de conexão e sincronização.
+>
+> ✏️ **Edição sempre online (v3.8.5)**: a edição de um registro não cai mais em modo offline nem mostra "Sem conexão com a API". Eram dois caminhos que terminavam no mesmo aviso — `PATCH` barrado pela rede (proxy corporativo/firewall que só libera GET/POST responde **405**/**403**, e alguns nem respondem, derrubando a conexão) e `PATCH` para um **id que não existe no banco** (registro criado no dispositivo enquanto estava sem conexão, com id local de timestamp `> 1e11`, ou registro apagado em outro computador) — que devolvia **404** e mandava o salvamento para a fila. Agora:
+>
+> - **método efetivo no servidor (`reqMethod`)**: a API aceita o cabeçalho `X-HTTP-Method-Override` e o parâmetro `?_method=` (nessa ordem), então um `POST` pode executar `PATCH`/`PUT`/`DELETE` — útil quando a rede bloqueia o método real. O `/api/echo` mostra `metodo`, `metodo_efetivo` e `metodo_override`, e o log da API registra `PATCH<-POST` quando os dois diferem;
+> - **override automático no front**: todo `PATCH`/`PUT`/`DELETE` do `api()` já sai com `X-HTTP-Method-Override`, e um `PATCH`/`PUT` que receba **405**/**403** ou falhe na rede é repetido automaticamente como **POST** com o mesmo cabeçalho, sobre o mesmo caminho;
+> - **rotas de atualização aceitam POST com id**: `/api/manutencoes/:id`, `/api/vehicles/:id` e `/api/trocas-oleo/:id` tratam `PATCH`/`PUT` **e** `POST` com id informado (no path ou no corpo) como atualização; `POST` sem id continua sendo criação (`201`);
+> - **upsert em `updateManutencao` / `updateVehicle`**: se o id não estiver no banco — ou for um id local `> 1e11`, que não caberia na coluna `INTEGER` (máx. 2.147.483.647) — o registro é **gravado** (com o mesmo id quando ele é real; com o próximo id livre quando é local, e o front adota o id devolvido na resposta) em vez de devolver **404**. A gravação usa `ON CONFLICT (id) DO UPDATE`, então duas máquinas salvando o mesmo id ao mesmo tempo também não estouram "duplicate key";
+> - **front não cai mais em offline ao editar**: `saveMaintenance` e `saveVehicle` mandam `POST` direto quando o registro editado é pendente de sincronização ou tem id local `> 1e11`, e repetem por `POST` (upsert) se um `PATCH` devolver **404** da própria API — a interface permanece online e nenhum registro é enfileirado por engano;
+> - **fila de sincronização não trava**: em `flushMaintenanceQueue` e `flushVehicleQueue`, um `update` com id local sai por `POST` e um **404** da API é repetido por `POST`, gravando o registro no banco remoto em vez de deixá-lo preso no dispositivo repetindo o mesmo `PATCH` para sempre.
