@@ -1,7 +1,7 @@
 'use strict';
 
 // ============================================================
-// FROTA PRO v3.8.5 — Controle de Frota (grupos S2, S3 e S4)
+// FROTA PRO v3.8.6 — Controle de Frota (grupos S2, S3 e S4)
 // Servidor Node nativo: API REST + arquivos estáticos.
 //
 // Persistência:
@@ -67,6 +67,20 @@
 //    banco, o registro é GRAVADO em vez de devolver 404. Id local (>1e11) não
 //    caberia na coluna INTEGER: o banco atribui o próximo id livre e o front
 //    adota o id devolvido na resposta.
+//
+// v3.8.6 — exclusão SEMPRE online + usuários à prova de rede. A exclusão
+// caía no mesmo buraco da edição: DELETE barrado pela rede (405/403 ou
+// conexão derrubada) virava \"Sem conexão com a API\" e o registro voltava
+// para a tela. Agora:
+//  • front: DELETE também sai com X-HTTP-Method-Override e, ao receber
+//    405/403 ou falha de rede, é repetido como POST + override — a API
+//    executa a exclusão normalmente. Vale para manutenções, veículos e filas.
+//  • API: /api/users/:id aceita POST com id (path ou corpo) como atualização
+//    (upsert), igual a /api/vehicles e /api/manutencoes. DELETE via override
+//    já funcionava, mas agora a rota de usuários também entra no mesmo padrão.
+//  • insertUser / updateUser viram upsert com suporte a id fixo e id local
+//    (>1e11), evitando \"duplicate key\" em corrida e permitindo que edições
+//    offline sejam gravadas com id real depois.
 // ============================================================
 
 const http = require('http');
@@ -80,7 +94,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.8.5';
+const VERSION = '3.8.6';
 
 // v3.8.5 — id local "de timestamp" (Date.now(), sempre > 1e11): registro criado
 // no dispositivo enquanto a API estava fora do ar. Ele nunca existiu no banco e
@@ -927,7 +941,7 @@ async function seedVehicles() {
   return true;
 }
 
-async function insertUser(body) {
+async function insertUser(body, idPreferido = null) {
   body = body || {};
   const u = {
     nome: String(body.nome || '').trim(),
@@ -937,16 +951,36 @@ async function insertUser(body) {
     ativo: body.ativo === undefined ? 1 : intOrNull(body.ativo) ?? 1
   };
   if (!u.nome || !u.usuario || !u.senha) { const e = new Error('Nome, usuário e senha são obrigatórios.'); e.statusCode = 400; throw e; }
+  // v3.8.6 — id informado = usuário já tem lugar marcado (edição offline / upsert)
+  const idFixo = idTemporarioLocal(idPreferido) ? null : Number(idPreferido);
   if (sql) {
     await ensureNeon();
+    if (idFixo) {
+      const rows = await sql`INSERT INTO users (id, nome, usuario, senha, role, ativo)
+        VALUES (${idFixo}, ${u.nome}, ${u.usuario}, ${u.senha}, ${u.role}, ${u.ativo})
+        ON CONFLICT (id) DO UPDATE SET nome = EXCLUDED.nome, usuario = EXCLUDED.usuario, senha = EXCLUDED.senha, role = EXCLUDED.role, ativo = EXCLUDED.ativo
+        RETURNING id, nome, usuario, role, ativo`;
+      if (rows[0]) return rows[0];
+      const error = new Error('O usuário foi enviado, mas não foi devolvido pelo banco.');
+      error.statusCode = 500;
+      throw error;
+    }
     return await retryDuplicateKey(async () => {
       const nid = await nextRowId('users');
-      await sql`INSERT INTO users (id, nome, usuario, senha, role, ativo) VALUES (${nid}, ${u.nome}, ${u.usuario}, ${u.senha}, ${u.role}, ${u.ativo})`;
-      return { id: nid, nome: u.nome, usuario: u.usuario, role: u.role, ativo: u.ativo };
+      const rows = await sql`INSERT INTO users (id, nome, usuario, senha, role, ativo) VALUES (${nid}, ${u.nome}, ${u.usuario}, ${u.senha}, ${u.role}, ${u.ativo}) RETURNING id, nome, usuario, role, ativo`;
+      return rows[0] || { id: nid, nome: u.nome, usuario: u.usuario, role: u.role, ativo: u.ativo };
     });
   }
   const arr = loadFile().users;
-  const novo = { id: nextId(arr), ...u };
+  const idx = idFixo ? arr.findIndex((x) => Number(x.id) === idFixo) : -1;
+  if (idx >= 0) {
+    const novaSenha = u.senha ? u.senha : arr[idx].senha;
+    arr[idx] = { ...arr[idx], nome: u.nome, usuario: u.usuario, senha: novaSenha, role: u.role, ativo: u.ativo, id: arr[idx].id };
+    saveFile();
+    const { senha, ...pub } = arr[idx];
+    return pub;
+  }
+  const novo = { id: idFixo || nextId(arr), ...u };
   arr.push(novo);
   saveFile();
   const { senha, ...pub } = novo;
@@ -955,19 +989,31 @@ async function insertUser(body) {
 
 async function updateUser(id, body) {
   body = body || {};
+  const idNum = Number(id);
+  const temporario = idTemporarioLocal(idNum);
+  if (temporario) return insertUser(body, null);
   // senha vazia/ausente = manter a que já está no banco; senão, gravar o hash.
   const novaSenha = body.senha === undefined || String(body.senha).trim() === '' ? undefined : hashSenha(body.senha);
   if (sql) {
     await ensureNeon();
-    const cur = await sql`SELECT * FROM users WHERE id = ${id}`;
-    if (cur.length === 0) return null;
-    const m = { ...cur[0], ...body, id, senha: novaSenha === undefined ? cur[0].senha : novaSenha };
-    await sql`UPDATE users SET nome = ${m.nome}, usuario = ${m.usuario}, senha = ${m.senha}, role = ${m.role}, ativo = ${m.ativo} WHERE id = ${id}`;
+    const cur = await sql`SELECT * FROM users WHERE id = ${idNum}`;
+    if (cur.length === 0) {
+      // v3.8.6 — UPSERT: id não está no banco, grava com esse mesmo id
+      return insertUser(body, idNum);
+    }
+    const m = { ...cur[0], ...body, id: idNum, senha: novaSenha === undefined ? cur[0].senha : novaSenha };
+    // Garante que nome/usuario não fiquem vazios no update parcial
+    if (!String(m.nome || '').trim() || !String(m.usuario || '').trim()) {
+      const e = new Error('Nome e usuário são obrigatórios.');
+      e.statusCode = 400;
+      throw e;
+    }
+    await sql`UPDATE users SET nome = ${m.nome}, usuario = ${m.usuario}, senha = ${m.senha}, role = ${m.role}, ativo = ${m.ativo} WHERE id = ${idNum}`;
     return { id: m.id, nome: m.nome, usuario: m.usuario, role: m.role, ativo: m.ativo };
   }
   const arr = loadFile().users;
-  const idx = arr.findIndex((x) => Number(x.id) === Number(id));
-  if (idx === -1) return null;
+  const idx = arr.findIndex((x) => Number(x.id) === idNum);
+  if (idx === -1) return insertUser(body, idNum); // upsert arquivo
   arr[idx] = { ...arr[idx], ...body, id: arr[idx].id, senha: novaSenha === undefined ? arr[idx].senha : novaSenha };
   saveFile();
   const { senha, ...pub } = arr[idx];
@@ -1505,10 +1551,17 @@ async function handleRequest(req, res) {
           const it = all.find((x) => Number(x.id) === id);
           return it ? json(res, 200, stripSenha(it)) : json(res, 404, { error: 'Not found' });
         }
-        if (reqMethod === 'POST') return json(res, 201, await insertUser(await parseBody(req)));
-        if ((reqMethod === 'PATCH' || reqMethod === 'PUT') && id) {
-          const upd = await updateUser(id, await parseBody(req));
-          return upd ? json(res, 200, upd) : json(res, 404, { error: 'Not found' });
+        // v3.8.6 — usuários à prova de rede: POST com id (path ou corpo) = atualização (upsert),
+        // igual a vehicles/manutencoes. Permite POST + X-HTTP-Method-Override: PATCH/DELETE
+        // quando a rede bloqueia o método real.
+        if (reqMethod === 'POST' || reqMethod === 'PATCH' || reqMethod === 'PUT') {
+          const corpo = await parseBody(req);
+          const alvo = id || idDoCorpo(corpo);
+          if (alvo) {
+            const upd = await updateUser(alvo, corpo);
+            return upd ? json(res, 200, upd) : json(res, 201, await insertUser(corpo, alvo));
+          }
+          if (reqMethod === 'POST') return json(res, 201, await insertUser(corpo));
         }
         if (reqMethod === 'DELETE' && id) {
           return (await deleteUser(id)) ? json(res, 200, { success: true }) : json(res, 404, { error: 'Not found' });
