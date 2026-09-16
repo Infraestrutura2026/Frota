@@ -382,6 +382,16 @@ a:focus-visible,
   font-size: .72rem;
   font-weight: 700;
   white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.conn-status:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+}
+.conn-status:active {
+  transform: scale(0.97);
 }
 
 .conn-status.conn-on { color: var(--success); background: var(--success-soft); }

@@ -18,6 +18,7 @@ Frota/
 │   ├── config.js       → configurações do front-end
 │   └── app.js          → lógica do front-end (login, dashboard, CRUD via API)
 ├── api/
+│   ├── index.js        → ponto de entrada principal /api na Vercel (usa server.js)
 │   └── [...path].js    → função serverless /api/* na Vercel (usa server.js)
 └── data/
     └── db.json         → banco local (modo dev, sem DATABASE_URL)
@@ -248,3 +249,11 @@ no banco.
 >   `A requisição não chegou à API (404 da plataforma, não da função) — o
 >   registro NÃO foi alterado no servidor. Exclusão enfileirada neste
 >   dispositivo — será repetida automaticamente assim que a API responder.`
+>
+> ⚡ **Sistema sempre online e auto-recuperação (v3.8.4)**:
+> - **Ponto de entrada canônico `api/index.js` + rewrites corrigidos na Vercel**: rotas da API (`/api/*`) agora contam com `api/index.js` e regras de rewrite explícitas no `vercel.json` (`/api/(.*)` → `/api`), impedindo que chamadas de API caiam na página NOT_FOUND 404 da Vercel;
+> - **Resolução inteligente de rota**: `server.js` detecta e desembala os cabeçalhos de rewrite da Vercel (`x-matched-path` e `x-forwarded-url`) e atende requisições diretas a `/api` com o status do sistema;
+> - **Retentativa transparente em falhas transitórias**: oscilações rápidas de rede e tempo de despertar do banco Neon (cold-start / 502 / 503 / 504) passam por retentativa automática no front-end antes de qualquer erro ser disparado, impedindo que salvamentos entrem em falso modo offline;
+> - **Heartbeat automático em segundo plano**: verificação periódica a cada 10s (em offline) ou 30s (em online) que detecta a volta da API e drena as filas pendentes (`flushMaintenanceQueue` e `flushVehicleQueue`) sem intervenção manual;
+> - **Reconexão imediata por eventos**: reconexão e sincronização instantâneas ao detectar sinal de rede no navegador (`window online`) ou quando o usuário volta para a aba (`visibilitychange`);
+> - **Badge de status interativo**: o indicador `● Offline` / `● Online` agora é clicável e exibe a quantidade de registros pendentes (`● Offline (1 pendente)`). Clicar no badge força teste imediato de conexão e sincronização.
