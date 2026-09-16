@@ -346,18 +346,16 @@ const App = (function() {
     return msg;
   }
 
-  // v3.8.5 — métodos que a rede corporativa costuma BLOQUEAR. Proxy, firewall ou
-  // gateway que só libera GET/POST responde 405 (Method Not Allowed) ou 403
-  // (Forbidden) a PATCH/PUT/DELETE — e alguns nem chegam a responder, derrubando
-  // a conexão (erro de rede). Duas defesas:
-  //  • o cabeçalho X-HTTP-Method-Override vai AUTOMATICAMENTE em todo
-  //    PATCH/PUT/DELETE, então mesmo a requisição original já chega à API
-  //    dizendo o que se pretende fazer (a API resolve o método por ele);
-  //  • se ainda assim vier 405/403 (ou falha de rede) num PATCH/PUT, a chamada
-  //    é repetida como POST + X-HTTP-Method-Override, que a API executa como a
-  //    operação pedida — a edição fica online em vez de cair em modo offline.
+  // v3.8.6 — exclusão SEMPRE online (continuação da v3.8.5).
+  // v3.8.5 cobriu PATCH/PUT (edição). Faltava DELETE: proxy/firewall que só
+  // libera GET/POST responde 405/403 a DELETE, e alguns derrubam a conexão.
+  // Agora DELETE também entra nas duas defesas:
+  //  • X-HTTP-Method-Override vai automaticamente em PATCH/PUT/DELETE;
+  //  • 405/403 ou falha de rede num PATCH/PUT/DELETE é repetido como POST +
+  //    X-HTTP-Method-Override — a API executa a operação pedida e a exclusão
+  //    não cai mais em modo offline.
   const METODOS_COM_OVERRIDE = ['PATCH','PUT','DELETE'];
-  const METODOS_COM_FALLBACK_POST = ['PATCH','PUT'];
+  const METODOS_COM_FALLBACK_POST = ['PATCH','PUT','DELETE'];
 
   async function api(path, opts, isRetry = false, viaPost = false){
     const ctrl=new AbortController();
@@ -391,9 +389,9 @@ const App = (function() {
         await new Promise(res=>setTimeout(res, 800));
         return api(path, opts, true, viaPost);
       }
-      // v3.8.5 — a rede DERRUBOU a conexão num PATCH/PUT (firewall/proxy que
-      // recusa o método sem responder HTTP): repete como POST com
-      // X-HTTP-Method-Override, que a API executa como a edição pedida. Só
+      // v3.8.6 — a rede DERRUBOU a conexão num PATCH/PUT/DELETE (firewall/proxy
+      // que recusa o método sem responder HTTP): repete como POST com
+      // X-HTTP-Method-Override, que a API executa como a operação pedida. Só
       // desiste — e aí sim cai em modo offline — se o POST também falhar.
       if(!viaPost && METODOS_COM_FALLBACK_POST.includes(method) && (!err || err.name!=='AbortError')){
         try{ console.warn('[API]', method, path, 'falha de rede → repetindo como POST com X-HTTP-Method-Override'); }catch{}
@@ -417,11 +415,11 @@ const App = (function() {
       return api(path, opts, true, viaPost);
     }
 
-    // v3.8.5 — 405 (Method Not Allowed) ou 403 (Forbidden) num PATCH/PUT é a
-    // assinatura de proxy corporativo/firewall/gateway que não libera o método.
-    // Em vez de mostrar erro e jogar a edição em modo offline, repete a MESMA
+    // v3.8.6 — 405 (Method Not Allowed) ou 403 (Forbidden) num PATCH/PUT/DELETE
+    // é a assinatura de proxy/firewall/gateway que não libera o método. Em vez
+    // de mostrar erro e jogar a operação em modo offline, repete a MESMA
     // operação como POST + X-HTTP-Method-Override — a API resolve o método pelo
-    // cabeçalho e executa a edição normalmente.
+    // cabeçalho e executa normalmente (edição ou exclusão).
     if(!viaPost && METODOS_COM_FALLBACK_POST.includes(method) && (r.status===405 || r.status===403)){
       try{ console.warn('[API]', method, finalPath, 'HTTP '+r.status+' → repetindo como POST com X-HTTP-Method-Override'); }catch{}
       try{ if(r.body&&r.body.cancel) r.body.cancel(); }catch{}
