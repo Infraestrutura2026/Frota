@@ -575,7 +575,7 @@ a:focus-visible,
 .nav-badge { margin-left: auto; padding: 2px 8px; border-radius: 999px; color: #fff; background: var(--danger); font-size: .66rem; font-weight: 700; line-height: 1.5; }
 
 /* Situação da troca de óleo (badge usada nas tabelas de Veículos / Troca de Óleo) */
-.oil-status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: .7rem; font-weight: 700; white-space: nowrap; }
+.oil-status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: .7rem; font-weight: 700; white-space: nowrap; text-transform: uppercase; }
 .oil-status.oil-ok { color: var(--success); background: var(--success-soft); }
 .oil-status.oil-atencao { color: #92400e; background: var(--warning-soft); }
 .oil-status.oil-vencida { color: var(--danger); background: var(--danger-soft); }

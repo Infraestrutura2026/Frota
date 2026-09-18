@@ -1,7 +1,7 @@
 'use strict';
 
 // ============================================================
-// FROTA PRO v3.9.0 — Controle de Frota (grupos S2, S3 e S4)
+// FROTA PRO v3.9.1 — Controle de Frota (grupos S2, S3 e S4)
 // Servidor Node nativo: API REST + arquivos estáticos.
 //
 // Persistência:
@@ -111,7 +111,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.9.0';
+const VERSION = '3.9.1';
 
 // v3.8.5 — id local "de timestamp" (Date.now(), sempre > 1e11): registro criado
 // no dispositivo enquanto a API estava fora do ar. Ele nunca existiu no banco e

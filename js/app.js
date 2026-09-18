@@ -129,7 +129,7 @@ const App = (function() {
     const restante=OIL_INTERVAL_KM-percorrido;
     const estado=restante<=0?'VENCIDA':(restante<=OIL_ALERTA_KM?'ATENCAO':'OK');
     const textos={
-      OK:{titulo:'Troca de óleo em dia',detalhe:`Próxima troca em ${kmLabel(restante)}, aos ${kmLabel(proximaKm)}.`},
+      OK:{titulo:'Troca de óleo em dia',detalhe:`Próxima troca aos ${kmLabel(proximaKm)}.`},
       ATENCAO:{titulo:'Troca de óleo próxima',detalhe:`Faltam ${kmLabel(restante)} para a próxima troca (aos ${kmLabel(proximaKm)}).`},
       VENCIDA:{titulo:'Troca de óleo vencida',detalhe:`Vencida há ${kmLabel(-restante)} — estava prevista para ${kmLabel(proximaKm)}.`}
     }[estado];
@@ -145,20 +145,39 @@ const App = (function() {
     if(st.estado==='SEM_KM')return 'Sem hodômetro';
     return 'Sem troca registrada';
   }
-  // Complemento do rótulo, com os números da situação
+  // v3.9.1 — resumo com a próxima troca: alimenta a frase do cartão do Painel
+  // Geral e o chip do histórico. Não menciona o intervalo de 10.000 km — o
+  // número que importa para o operador é o da próxima troca.
   function oilStatusResumo(st){
     if(!st)return '';
-    if(st.estado==='OK')return `próxima em ${kmLabel(st.restante)} (${kmLabel(st.proximaKm)})`;
+    if(st.estado==='OK')return `Próxima troca com ${kmLabel(st.proximaKm)}`;
+    if(st.estado==='ATENCAO')return `Faltam ${kmLabel(st.restante)} para os ${kmLabel(st.proximaKm)}`;
+    if(st.estado==='VENCIDA')return `Prevista para ${kmLabel(st.proximaKm)} — vencida há ${kmLabel(-st.restante)}`;
+    if(st.estado==='SEM_KM')return 'Última troca sem hodômetro';
+    return 'Nenhuma troca de óleo registrada';
+  }
+  // v3.9.1 — frase da linha de troca de óleo do cartão do veículo (Painel Geral):
+  // "ESTADO. RESUMO" em caixa alta — só o estado e a próxima troca, sem o
+  // "quanto falta" e sem o intervalo de 10.000 km.
+  function oilStatusFrase(st){
+    if(!st)return '—';
+    if(st.estado==='SEM_REGISTRO'||st.estado==='SEM_KM')return oilStatusCurto(st).toUpperCase();
+    return `${oilStatusCurto(st)}. ${oilStatusResumo(st)}`.toUpperCase();
+  }
+  // v3.9.1 — urgência curta, usada só como subtítulo nas tabelas
+  // ("faltam X km" / "X km além do previsto").
+  function oilStatusUrgencia(st){
+    if(!st)return '';
     if(st.estado==='ATENCAO')return `faltam ${kmLabel(st.restante)}`;
-    if(st.estado==='VENCIDA')return `${kmLabel(-st.restante)} além do previsto (${kmLabel(st.proximaKm)})`;
-    if(st.estado==='SEM_KM')return 'última troca sem hodômetro';
-    return `intervalo de ${kmLabel(OIL_INTERVAL_KM)}`;
+    if(st.estado==='VENCIDA')return `${kmLabel(-st.restante)} além do previsto`;
+    return '';
   }
   const OIL_ICONE={OK:'✅',ATENCAO:'⚠️',VENCIDA:'⛔',SEM_REGISTRO:'◉',SEM_KM:'◉'};
   function oilBadgeHtml(st){
     if(!st)return '—';
+    const urgencia=oilStatusUrgencia(st); // v3.9.1 — subtítulo só quando há urgência
     return `<span class="oil-status oil-${st.estado.toLowerCase()}" title="${esc(st.titulo)} — ${esc(st.detalhe)}">${OIL_ICONE[st.estado]||'◉'} ${esc(oilStatusCurto(st))}</span>`
-      +`<small class="table-subtitle">${esc(oilStatusResumo(st))}</small>`;
+      +(urgencia?`<small class="table-subtitle">${esc(urgencia)}</small>`:'');
   }
   // Ordem de urgência: vencidas primeiro, depois as que estão chegando no intervalo.
   const OIL_PESO={VENCIDA:0,ATENCAO:1,SEM_REGISTRO:2,SEM_KM:3,OK:4};
@@ -879,12 +898,13 @@ const App = (function() {
     g.innerHTML=ks.map(gr=>{
       const i=info(gr); const gv=vehicles.filter(v=>norm(v.grupo)===gr);
       // O cartão inteiro abre o histórico; a edição do veículo fica no botão de lápis.
-      // A linha "Troca de óleo" (v3.9.0) mostra a próxima troca e fica colorida quando
-      // o veículo se aproxima do intervalo de 10.000 km ou passa dele.
+      // A linha "Troca de óleo" (v3.9.0) mostra só o estado e a próxima troca, em
+      // caixa alta (v3.9.1, oilStatusFrase) — sem o "quanto falta" nem o intervalo;
+      // o cartão ganha faixa colorida no aviso de troca próxima (≤ 1.000 km) ou vencida.
       const items=gv.map(v=>{
         const st=oilStatus(v);
         const placa=esc(formatPlacaMercosul(v.placa));
-        const oil=`<span class="dashboard-vehicle-oil oil-${st.estado.toLowerCase()}" title="${esc(st.titulo)} — ${esc(st.detalhe)}">${OIL_ICONE[st.estado]||'◉'} <b>${esc(oilStatusCurto(st))}</b> · ${esc(oilStatusResumo(st))}</span>`;
+        const oil=`<span class="dashboard-vehicle-oil oil-${st.estado.toLowerCase()}" title="${esc(st.titulo)} — ${esc(st.detalhe)}">${OIL_ICONE[st.estado]||'◉'} <b>${esc(oilStatusFrase(st))}</b></span>`;
         const faixa=st.estado==='VENCIDA'?' is-oil-vencida':(st.estado==='ATENCAO'?' is-oil-atencao':'');
         return `<div class="dashboard-vehicle-item${faixa}" role="button" tabindex="0" title="Ver histórico de manutenção de ${placa}" aria-label="Ver histórico de manutenção de ${placa}" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}"><span class="dashboard-vehicle-topline"><span class="placa-click"><span class="placa-badge">${placaMarkup(formatPlacaMercosul(v.placa))}</span><span class="placa-wrench" aria-hidden="true">🔧</span></span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong>${oil}<span class="dashboard-vehicle-foot"><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span><button type="button" class="btn btn-sm btn-icon dashboard-vehicle-edit" title="Editar veículo" aria-label="Editar ${placa}" onclick="event.stopPropagation();App.editVehicle(${Number(v.id)})">✏️</button></span></div>`;
       }).join('');
@@ -1489,7 +1509,7 @@ const App = (function() {
       return `<tr><td>${placaLink({vehicle_id:v.id,placa:v.placa},v.placa)}<small class="table-subtitle">${esc(model||'Veículo')}</small></td>
         <td>${ultima}</td>
         <td>${kmLabel(st.kmAtual)}</td>
-        <td>${st.proximaKm?kmLabel(st.proximaKm):'<span class="report-muted">—</span>'}${st.estado==='VENCIDA'||st.estado==='ATENCAO'?`<small class="table-subtitle">${esc(oilStatusResumo(st))}</small>`:''}</td>
+        <td>${st.proximaKm?kmLabel(st.proximaKm):'<span class="report-muted">—</span>'}${st.estado==='VENCIDA'||st.estado==='ATENCAO'?`<small class="table-subtitle">${esc(oilStatusUrgencia(st))}</small>`:''}</td>
         <td>${oilBadgeHtml(st)}</td>
         <td><button type="button" class="btn btn-sm btn-primary" title="Registrar troca de óleo para ${esc(placa)}" onclick="App.openMaintenanceModal('TROCA DE ÓLEO', ${Number(v.id)})">◉ Registrar troca</button></td></tr>`;
     }).join('');
@@ -1532,7 +1552,7 @@ const App = (function() {
       const isReferencia=!!(st&&st.ultima&&Number(st.ultima.id)===Number(item.id));
       const alerta=isReferencia&&(st.estado==='VENCIDA'||st.estado==='ATENCAO');
       const proximaTxt=proximaKm?kmLabel(proximaKm):'-';
-      const proximaSub=alerta?`<small class="table-subtitle oil-${st.estado.toLowerCase()}">${esc(oilStatusResumo(st))}</small>`
+      const proximaSub=alerta?`<small class="table-subtitle oil-${st.estado.toLowerCase()}">${esc(oilStatusUrgencia(st))}</small>`
         :(isReferencia?'<small class="table-subtitle">referência atual</small>':'');
       return `<tr><td>${dateLabel(item.data)}</td><td>${placaLink(item,plate)}<small class="table-subtitle">${esc(model)}</small></td><td>${esc(item.tipo_oleo||'-')}</td><td>${item.hodometro==null?'-':`${Number(item.hodometro).toLocaleString('pt-BR')} km`}</td><td>${proximaTxt}${proximaSub}</td><td>${quantity}</td><td>${esc(item.observacoes||'-')}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(item.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(item.id)})">🗑️</button></td></tr>`;
     }).join('');
