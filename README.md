@@ -68,7 +68,7 @@ diminui), e o front faz o mesmo no cache local.
 
 | Tela | O que mostra |
 |---|---|
-| **Painel Geral** | Card **“Troca de óleo — próxima troca”** com o resumo (`N vencidas · N próximas · N sem troca registrada`) e a lista dos veículos que pedem atenção (clicar abre o histórico; **◉ Trocar** já abre a troca de óleo do veículo). Cada cartão de veículo ganhou a linha colorida da troca de óleo e faixa amarela/vermelha na lateral. |
+| **Painel Geral** | Card **“Troca de óleo — próxima troca”** com o resumo (`N vencidas · N próximas · N sem troca registrada`) e a lista dos veículos que pedem atenção (clicar abre o histórico; **◉ Trocar** já abre a troca de óleo do veículo). Cada cartão de veículo tem a linha da troca de óleo em **caixa alta**, só com o estado e a próxima troca — ex.: `✅ TROCA EM DIA. PRÓXIMA TROCA COM 62.952 KM`, `⚠️ TROCA PRÓXIMA. FALTAM 631 KM PARA OS 93.000 KM`, `⛔ TROCA VENCIDA. PREVISTA PARA 50.000 KM — VENCIDA HÁ 2.906 KM` e `◉ SEM TROCA REGISTRADA` — com faixa amarela/vermelha na lateral quando está próxima ou vencida. |
 | **Menu lateral** | Selo vermelho no item **Troca de Óleo** com a quantidade de veículos pedindo atenção. |
 | **Veículos** | Coluna **“Troca de óleo”** com a situação (badge + faltam/vencidos) e o botão **◉** para registrar a troca direto na linha. |
 | **Troca de Óleo** | Tabela **“Situação da frota — próxima troca”** (última troca, hodômetro, próxima troca, situação e ação), contador de vencidas/próximas e a coluna **“Próxima troca”** no histórico de registros. |
