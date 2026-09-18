@@ -70,6 +70,7 @@
         </button>
         <button type="button" class="nav-item" data-page="oil-changes">
           <span class="nav-icon" aria-hidden="true">◉</span> Troca de Óleo
+          <span class="nav-badge" id="nav-oil-badge" hidden>0</span>
         </button>
       </nav>
 
@@ -111,6 +112,19 @@
               <span class="legend-item"><i class="dot dot-maint"></i><span id="lbl-maint">—</span></span>
               <span class="legend-item"><i class="dot dot-other"></i><span id="lbl-other">—</span></span>
             </div>
+          </div>
+
+          <!-- Avisos de troca de óleo (intervalo fixo de 10.000 km) -->
+          <div class="card oil-alert-card" id="oil-alert-card">
+            <div class="section-head">
+              <div>
+                <span class="section-kicker">Manutenção preventiva</span>
+                <h3>Troca de óleo — próxima troca</h3>
+              </div>
+              <span class="oil-alert-summary" id="oil-alert-summary">—</span>
+            </div>
+            <p class="oil-alert-note">Intervalo fixo de <b>10.000 km</b> entre trocas: ao registrar uma troca, a próxima é programada automaticamente no hodômetro + 10.000 km. O aviso amarelo aparece a 1.000 km do vencimento e fica vermelho quando o veículo passa do intervalo.</p>
+            <div class="oil-alert-list" id="oil-alert-list"></div>
           </div>
 
           <div class="section-head">
@@ -203,6 +217,14 @@
             <div class="card oil-summary-card"><span class="summary-label">Óleo utilizado</span><strong id="oil-summary-liters">0</strong><small>litros no período</small></div>
           </div>
 
+          <div class="card oil-table-card">
+            <div class="section-head oil-list-head">
+              <div><span class="section-kicker">Acompanhamento</span><h3>Situação da frota — próxima troca</h3></div>
+              <span class="section-count" id="oil-situation-count">—</span>
+            </div>
+            <div class="table-responsive" id="oil-situation-list"></div>
+          </div>
+
           <div class="vehicles-toolbar card oil-toolbar">
             <input type="search" id="oil-search" placeholder="Buscar por placa, óleo ou observação…" aria-label="Buscar troca de óleo">
             <label class="oil-month-field"><span>Mês de referência</span><input type="month" id="oil-month-filter" aria-label="Filtrar por mês"></label>
@@ -261,18 +283,19 @@
             <span>Hodômetro (km)</span>
             <input type="number" id="m-hodometro" name="hodometro" min="0" placeholder="0">
           </label>
-          <label class="form-field">
-            <span>Próxima manutenção (km)</span>
+          <label class="form-field" id="m-proxima-field">
+            <span id="m-proxima-label">Próxima manutenção (km)</span>
             <input type="number" id="m-proxima" name="proxima_manutencao" min="0" placeholder="0">
           </label>
-          <label class="form-field oil-only">
+          <label class="form-field oil-only" hidden>
             <span>Tipo de óleo</span>
             <input type="text" id="m-tipo-oleo" name="tipo_oleo" placeholder="5W30, 15W40…">
           </label>
-          <label class="form-field oil-only">
+          <label class="form-field oil-only" hidden>
             <span>Quantidade (litros)</span>
             <input type="number" id="m-quantidade" name="quantidade" min="0" step="0.1" placeholder="0">
           </label>
+          <p class="form-field form-field-wide oil-schedule oil-only" id="m-oil-schedule" hidden></p>
           <label class="form-field">
             <span>Status da OS</span>
             <select id="m-status-os" name="status_os">

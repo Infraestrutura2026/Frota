@@ -1,7 +1,7 @@
 'use strict';
 
 // ============================================================
-// FROTA PRO v3.8.8 — Controle de Frota (grupos S2, S3 e S4)
+// FROTA PRO v3.9.0 — Controle de Frota (grupos S2, S3 e S4)
 // Servidor Node nativo: API REST + arquivos estáticos.
 //
 // Persistência:
@@ -81,6 +81,23 @@
 //  • insertUser / updateUser viram upsert com suporte a id fixo e id local
 //    (>1e11), evitando \"duplicate key\" em corrida e permitindo que edições
 //    offline sejam gravadas com id real depois.
+//
+// v3.9.0 — TROCA DE ÓLEO COM INTERVALO FIXO DE 10.000 KM + AVISO NO PAINEL.
+// A regra da frota é que toda troca de óleo vale por 10.000 km, e o alerta da
+// próxima troca precisa aparecer no Painel Geral / Veículos:
+//  • aplicaIntervaloTrocaOleo: toda troca gravada por insertManutencao /
+//    updateManutencao sai com proxima_manutencao = hodômetro + 10.000 km,
+//    mesmo que o cliente mande outro valor (vale para o app, para a fila
+//    offline do navegador e para chamadas diretas na API);
+//  • sincronizaHodometroVeiculo: OS lançada com hodômetro maior atualiza o
+//    hodômetro do veículo (nunca diminui) — sem isso o "km atual" do cadastro,
+//    que é a base do aviso, ficaria congelado;
+//  • front (js/app.js): o campo "Próxima troca" do modal é calculado e somente
+//    leitura; o Painel Geral ganhou o card "Troca de óleo — próxima troca", os
+//    cartões de veículo mostram a situação colorida, a página Veículos ganhou a
+//    coluna "Troca de óleo" e a página Troca de Óleo ganhou a tabela "Situação
+//    da frota". O aviso fica amarelo a 1.000 km do vencimento e vermelho depois
+//    dos 10.000 km.
 // ============================================================
 
 const http = require('http');
@@ -94,7 +111,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.8.8';
+const VERSION = '3.9.0';
 
 // v3.8.5 — id local "de timestamp" (Date.now(), sempre > 1e11): registro criado
 // no dispositivo enquanto a API estava fora do ar. Ele nunca existiu no banco e
@@ -503,6 +520,44 @@ async function retryDuplicateKey(fn, tentativas = 8) {
 const MAN_TIPOS = ['PREVENTIVA', 'CORRETIVA', 'EMERGENCIAL', 'REVISÃO', 'RECALL', 'TROCA DE ÓLEO'];
 const MAN_STATUS = ['EM ANDAMENTO', 'CONCLUÍDA', 'AGUARDANDO PEÇA', 'CANCELADA'];
 
+// v3.9.0 — INTERVALO FIXO ENTRE TROCAS DE ÓLEO: 10.000 km.
+// A regra vale para TODA troca de óleo, venha de onde vier: app, fila offline do
+// navegador ou chamada direta na API. O servidor é a fonte da verdade — a próxima
+// troca é sempre "hodômetro da troca + 10.000 km" (não há como gravar um registro
+// de troca com proxima_manutencao divergente). O valor também alimenta o aviso de
+// vencimento exibido no Painel Geral / Veículos (js/app.js).
+// Para mudar o intervalo, altere aqui E em js/app.js (mesma constante).
+const OIL_INTERVAL_KM = 10000;
+
+function aplicaIntervaloTrocaOleo(data) {
+  if (!data || String(data.tipo || '').toUpperCase() !== 'TROCA DE ÓLEO') return data;
+  const km = intOrNull(data.hodometro);
+  if (km !== null && km > 0) data.proxima_manutencao = km + OIL_INTERVAL_KM;
+  return data;
+}
+
+// v3.9.0 — o hodômetro do cadastro do veículo é o "km atual" usado nos avisos de
+// troca de óleo. Toda OS lançada com km maior atualiza o veículo — nunca diminui,
+// então um lançamento equivocado não faz o hodômetro andar para trás. Falha aqui
+// não derruba o salvamento da OS: o registro é o dado principal.
+async function sincronizaHodometroVeiculo(vehicleId, hodometro) {
+  const km = intOrNull(hodometro);
+  const id = intOrNull(vehicleId);
+  if (!id || km === null || km <= 0) return;
+  try {
+    if (sql) {
+      await ensureNeon();
+      await sql`UPDATE vehicles SET hodometro = ${km}
+        WHERE id = ${id} AND COALESCE(hodometro, 0) < ${km}`;
+    } else {
+      const veiculo = (loadFile().vehicles || []).find((v) => Number(v.id) === id);
+      if (veiculo && Number(veiculo.hodometro || 0) < km) { veiculo.hodometro = km; saveFile(); }
+    }
+  } catch (e) {
+    console.error('[API] hodômetro do veículo não atualizado:', reasonDaFalha(e));
+  }
+}
+
 function manutencaoData(body) {
   body = body || {};
   const vehicleId = intOrNull(body.vehicle_id ?? body.veiculo_id ?? body.vehicleId ?? body.veiculoId);
@@ -621,7 +676,8 @@ async function completeManutencaoVehicle(data) {
 }
 
 async function insertManutencao(body, idPreferido = null) {
-  const data = await completeManutencaoVehicle(manutencaoData(body));
+  // v3.9.0 — troca de óleo já entra com a próxima troca calculada (hodômetro + 10.000 km)
+  const data = aplicaIntervaloTrocaOleo(await completeManutencaoVehicle(manutencaoData(body)));
   if (!data.vehicle_id && !data.placa) {
     const error = new Error('Veículo é obrigatório.');
     error.statusCode = 400;
@@ -633,6 +689,8 @@ async function insertManutencao(body, idPreferido = null) {
     error.statusCode = 400;
     throw error;
   }
+  // v3.9.0 — o km do cadastro do veículo acompanha a OS (nunca diminui)
+  const sincronizaKm = () => sincronizaHodometroVeiculo(data.vehicle_id, data.hodometro);
   // v3.8.5 — id informado = o registro já tem lugar marcado no banco (edição de
   // algo que não estava lá). Um id local de timestamp (>1e11) NÃO serve: não
   // caberia na coluna INTEGER, então o banco atribui o próximo id livre e o
@@ -662,6 +720,7 @@ async function insertManutencao(body, idPreferido = null) {
         error.statusCode = 500;
         throw error;
       }
+      await sincronizaKm();
       return publicManutencao(rows[0]);
     }
     const row = await retryDuplicateKey(async () => {
@@ -679,6 +738,7 @@ async function insertManutencao(body, idPreferido = null) {
       error.statusCode = 500;
       throw error;
     }
+    await sincronizaKm();
     return publicManutencao(row);
   }
   const arr = loadFile().manutencoes;
@@ -686,11 +746,13 @@ async function insertManutencao(body, idPreferido = null) {
   if (idx >= 0) {
     arr[idx] = { ...arr[idx], ...data, id: arr[idx].id };
     saveFile();
+    await sincronizaKm();
     return publicManutencao(arr[idx]);
   }
   const item = { id: idFixo || nextId(arr), ...data, created_at: new Date().toISOString() };
   arr.push(item);
   saveFile();
+  await sincronizaKm();
   return publicManutencao(item);
 }
 
@@ -717,7 +779,8 @@ async function updateManutencao(id, body) {
   // usuário digitava e o registro parecia perdido. Um id real é reaproveitado;
   // um id local recebe o próximo id livre (o front adota o id da resposta).
   if (!current) return insertManutencao(body || {}, temporario ? null : idNum);
-  const merged = await completeManutencaoVehicle(manutencaoData({ ...current, ...(body || {}) }));
+  // v3.9.0 — editar uma troca de óleo recalcula a próxima troca (hodômetro + 10.000 km)
+  const merged = aplicaIntervaloTrocaOleo(await completeManutencaoVehicle(manutencaoData({ ...current, ...(body || {}) })));
   if (!merged.vehicle_id && !merged.placa) {
     const error = new Error('Veículo é obrigatório.');
     error.statusCode = 400;
@@ -729,6 +792,8 @@ async function updateManutencao(id, body) {
     error.statusCode = 400;
     throw error;
   }
+  // v3.9.0 — o km do cadastro do veículo acompanha a OS editada (nunca diminui)
+  const sincronizaKm = () => sincronizaHodometroVeiculo(merged.vehicle_id, merged.hodometro);
   if (sql) {
     await sql`UPDATE manutencoes SET
       vehicle_id = ${merged.vehicle_id}, veiculo_id = ${merged.veiculo_id}, placa = ${merged.placa},
@@ -739,12 +804,14 @@ async function updateManutencao(id, body) {
       WHERE id = ${idNum}`;
     const rows = await sql`SELECT id, vehicle_id, veiculo_id, placa, tipo, data, data_saida, hodometro, proxima_manutencao, servico, itens, oficina, custo, status_os, tipo_oleo, quantidade, observacoes, created_at
       FROM manutencoes WHERE id = ${idNum}`;
+    await sincronizaKm();
     return publicManutencao(rows[0]);
   }
   const arr = loadFile().manutencoes;
   const index = arr.findIndex((item) => Number(item.id) === idNum);
   arr[index] = { ...arr[index], ...merged, id: arr[index].id };
   saveFile();
+  await sincronizaKm();
   return publicManutencao(arr[index]);
 }
 
@@ -1446,7 +1513,7 @@ async function handleRequest(req, res) {
       if (resource === 'status') {
         const vehicles = await listVehicles();
         const manutencoes = await listManutencoes();
-        return json(res, 200, { online: true, version: VERSION, db: sql ? 'neon' : 'file', counts: { vehicles: vehicles.length, manutencoes: manutencoes.length, trocas_oleo: manutencoes.filter((m) => m.tipo === 'TROCA DE ÓLEO').length } });
+        return json(res, 200, { online: true, version: VERSION, db: sql ? 'neon' : 'file', intervalo_troca_oleo_km: OIL_INTERVAL_KM, counts: { vehicles: vehicles.length, manutencoes: manutencoes.length, trocas_oleo: manutencoes.filter((m) => m.tipo === 'TROCA DE ÓLEO').length } });
       }
       if (resource === 'data' && reqMethod === 'GET') {
         return json(res, 200, { vehicles: await listVehicles(), users: (await listUsers()).map(stripSenha) });
