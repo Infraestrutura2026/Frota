@@ -42,6 +42,48 @@ as **ordens de serviço de manutenção** e trata a **troca de óleo** como um t
 (`TROCA DE ÓLEO`). Trocas de óleo antigas (tabela `oil_changes`) são migradas
 automaticamente para `manutencoes` na primeira execução, sem ação manual.
 
+## 🛢️ Troca de óleo — intervalo fixo de 10.000 km e aviso no painel
+
+**Toda troca de óleo vale por 10.000 km.** A regra é aplicada nas duas pontas:
+
+- **No formulário** (`Manutenção` → tipo *Troca de óleo*, ou
+  **Troca de Óleo → Registrar troca**), o campo **“Próxima troca (km)”** é
+  **calculado e somente leitura**: `hodômetro + 10.000 km`. O hodômetro já vem
+  preenchido com o km do cadastro do veículo, e o valor é recalculado enquanto o
+  operador digita — não há como gravar uma troca com intervalo diferente.
+- **Na API** (`server.js`), `insertManutencao` / `updateManutencao` aplicam a
+  mesma regra (`aplicaIntervaloTrocaOleo`), então o intervalo também vale para
+  lançamentos que sobem pela **fila offline** do navegador ou por chamada direta
+  em `/api/manutencoes` e `/api/trocas-oleo`. `GET /api/status` informa o valor
+  vigente em `intervalo_troca_oleo_km`.
+
+Para mudar o intervalo (ex.: 15.000 km), altere `OIL_INTERVAL_KM` nos **dois**
+arquivos: `server.js` e `js/app.js`.
+
+O **hodômetro do cadastro do veículo** é o “km atual” usado no cálculo: toda OS
+lançada com km maior atualiza o veículo (`sincronizaHodometroVeiculo`, nunca
+diminui), e o front faz o mesmo no cache local.
+
+### Onde o aviso aparece
+
+| Tela | O que mostra |
+|---|---|
+| **Painel Geral** | Card **“Troca de óleo — próxima troca”** com o resumo (`N vencidas · N próximas · N sem troca registrada`) e a lista dos veículos que pedem atenção (clicar abre o histórico; **◉ Trocar** já abre a troca de óleo do veículo). Cada cartão de veículo ganhou a linha colorida da troca de óleo e faixa amarela/vermelha na lateral. |
+| **Menu lateral** | Selo vermelho no item **Troca de Óleo** com a quantidade de veículos pedindo atenção. |
+| **Veículos** | Coluna **“Troca de óleo”** com a situação (badge + faltam/vencidos) e o botão **◉** para registrar a troca direto na linha. |
+| **Troca de Óleo** | Tabela **“Situação da frota — próxima troca”** (última troca, hodômetro, próxima troca, situação e ação), contador de vencidas/próximas e a coluna **“Próxima troca”** no histórico de registros. |
+| **Histórico do veículo** | Chip com a situação atual da troca de óleo. |
+
+Estados exibidos: **✅ Troca em dia** (mais de 1.000 km para vencer),
+**⚠️ Troca próxima** (faltam 1.000 km ou menos), **⛔ Troca vencida** (passou dos
+10.000 km — mostra quantos km além), **◉ Sem troca registrada** (nenhum registro
+no sistema) e **◉ Sem hodômetro** (última troca sem km lançado).
+
+Regras de lançamento: um hodômetro **menor** que o da última troca é recusado
+(dado inconsistente) e uma troca lançada **antes** de completar os 10.000 km pede
+confirmação — é permitida (troca antecipada é decisão da oficina), mas fica
+registrada com o aviso.
+
 ## 🧾 Histórico de manutenção por veículo
 
 No **Painel Geral**, clicar em **qualquer parte do cartão** do veículo abre o **histórico daquele
@@ -152,6 +194,12 @@ no banco.
 | DELETE       | `/api/trocas-oleo/:id` | Exclui um registro          |
 | GET          | `/api/trocas-oleo/relatorio-mensal` | Relatório mensal |
 
+> 🛢️ **Troca de óleo — intervalo fixo (v3.9.0)**: toda troca de óleo gravada
+> (POST/PATCH em `/api/manutencoes`, `/api/trocas-oleo` ou `/api/manutencao`)
+> sai com `proxima_manutencao = hodômetro + 10.000 km`, mesmo que o cliente
+> mande outro valor — ver a seção “Troca de óleo — intervalo fixo de 10.000 km e
+> aviso no painel”.
+>
 > 🔒 Senhas ficam hasheadas (SHA-256) e nunca são retornadas pela API.
 > 🔎 **Diagnóstico de erros**: respostas 500 da API trazem a causa vinda do Postgres
 > (`{"error":"Erro no servidor: column \"itens\" of relation \"manutencoes\" does not exist","sqlstate":"42703"}`)

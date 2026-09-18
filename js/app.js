@@ -72,6 +72,104 @@ const App = (function() {
   function currentOilMonth(){ return document.getElementById('oil-month-filter')?.value || new Date().toISOString().slice(0,7); }
   function oilRecords(){ return dedupeById(maintenances).filter(m => (m.tipo||'').toUpperCase()==='TROCA DE ÓLEO'); }
 
+  // ================= TROCA DE ÓLEO: INTERVALO FIXO DE 10.000 KM (v3.9.0) =================
+  // Regra da frota: TODA troca de óleo vale por 10.000 km. Ao registrar uma troca, a
+  // próxima já sai programada em "hodômetro + 10.000 km" — o campo "Próxima troca" é
+  // CALCULADO (somente leitura), não digitado à mão. O servidor (server.js) aplica a
+  // mesma regra, então o intervalo também vale para o que sobe pela fila offline e
+  // para lançamentos feitos direto na API.
+  const OIL_INTERVAL_KM = 10000;
+  // Aviso antecipado: a partir de 1.000 km do vencimento o veículo entra em
+  // "troca próxima" (amarelo); passando dos 10.000 km vira "troca vencida" (vermelho).
+  const OIL_ALERTA_KM = 1000;
+
+  function isOilChange(m){ return String((m&&m.tipo)||'').trim().toUpperCase()==='TROCA DE ÓLEO'; }
+  function kmLabel(n){ return `${Number(n||0).toLocaleString('pt-BR')} km`; }
+
+  // Trocas de óleo que contam para o intervalo: fora as canceladas e, ao editar um
+  // registro, fora o próprio registro editado. Registros antigos podem ter só a placa:
+  // o vínculo é aceito por vehicle_id ou por placa.
+  function oilRecordsOf(v, ignoreId){
+    const id=Number(v&&v.id), placa=String((v&&v.placa)||'').toUpperCase();
+    return dedupeById(maintenances).filter(m=>{
+      if(!isOilChange(m))return false;
+      if(ignoreId!=null&&Number(m.id)===Number(ignoreId))return false;
+      if(String(m.status_os||'').toUpperCase()==='CANCELADA')return false;
+      if(Number(m.vehicle_id)===id)return true;
+      return !m.vehicle_id&&!!placa&&String(m.placa||'').toUpperCase()===placa;
+    });
+  }
+
+  // Situação da troca de óleo de um veículo:
+  //  • base     = hodômetro da ÚLTIMA troca (maior km; data e id desempatam);
+  //  • próxima  = base + 10.000 km (o mesmo número gravado em proxima_manutencao);
+  //  • estado   = OK | ATENCAO | VENCIDA | SEM_REGISTRO | SEM_KM.
+  // O km de referência do veículo é o maior entre o hodômetro do cadastro e o da
+  // última troca — assim uma OS lançada com km maior nunca "anda para trás".
+  function oilStatus(v, ignoreId){
+    const kmAtual=Math.max(0,Number(v&&v.hodometro)||0);
+    const registros=oilRecordsOf(v, ignoreId);
+    const base={kmAtual, ultima:null, baseKm:null, proximaKm:null, percorrido:null, restante:null, qtdTrocas:registros.length};
+    if(!registros.length){
+      return {...base, estado:'SEM_REGISTRO', titulo:'Sem troca de óleo registrada',
+        detalhe:`Nenhuma troca de óleo lançada para este veículo (intervalo padrão de ${kmLabel(OIL_INTERVAL_KM)}).`};
+    }
+    const ultima=registros.slice().sort((a,b)=>
+      (Number(b.hodometro)||-1)-(Number(a.hodometro)||-1)||
+      String(b.data||'').slice(0,10).localeCompare(String(a.data||'').slice(0,10))||
+      Number(b.id||0)-Number(a.id||0))[0];
+    const baseKm=Number(ultima.hodometro);
+    if(!Number.isFinite(baseKm)||baseKm<=0){
+      return {...base, ultima, estado:'SEM_KM', titulo:'Última troca sem hodômetro',
+        detalhe:'A última troca de óleo não tem hodômetro — edite o registro para o aviso de vencimento funcionar.'};
+    }
+    const proximaKm=baseKm+OIL_INTERVAL_KM;
+    const referenciaKm=Math.max(kmAtual, baseKm);
+    const percorrido=referenciaKm-baseKm;
+    const restante=OIL_INTERVAL_KM-percorrido;
+    const estado=restante<=0?'VENCIDA':(restante<=OIL_ALERTA_KM?'ATENCAO':'OK');
+    const textos={
+      OK:{titulo:'Troca de óleo em dia',detalhe:`Próxima troca em ${kmLabel(restante)}, aos ${kmLabel(proximaKm)}.`},
+      ATENCAO:{titulo:'Troca de óleo próxima',detalhe:`Faltam ${kmLabel(restante)} para a próxima troca (aos ${kmLabel(proximaKm)}).`},
+      VENCIDA:{titulo:'Troca de óleo vencida',detalhe:`Vencida há ${kmLabel(-restante)} — estava prevista para ${kmLabel(proximaKm)}.`}
+    }[estado];
+    return {...base, ultima, baseKm, proximaKm, percorrido, restante, referenciaKm, estado, ...textos};
+  }
+
+  // Rótulo curto (badges/tabelas)
+  function oilStatusCurto(st){
+    if(!st)return '—';
+    if(st.estado==='OK')return 'Troca em dia';
+    if(st.estado==='ATENCAO')return 'Troca próxima';
+    if(st.estado==='VENCIDA')return 'Troca vencida';
+    if(st.estado==='SEM_KM')return 'Sem hodômetro';
+    return 'Sem troca registrada';
+  }
+  // Complemento do rótulo, com os números da situação
+  function oilStatusResumo(st){
+    if(!st)return '';
+    if(st.estado==='OK')return `próxima em ${kmLabel(st.restante)} (${kmLabel(st.proximaKm)})`;
+    if(st.estado==='ATENCAO')return `faltam ${kmLabel(st.restante)}`;
+    if(st.estado==='VENCIDA')return `${kmLabel(-st.restante)} além do previsto (${kmLabel(st.proximaKm)})`;
+    if(st.estado==='SEM_KM')return 'última troca sem hodômetro';
+    return `intervalo de ${kmLabel(OIL_INTERVAL_KM)}`;
+  }
+  const OIL_ICONE={OK:'✅',ATENCAO:'⚠️',VENCIDA:'⛔',SEM_REGISTRO:'◉',SEM_KM:'◉'};
+  function oilBadgeHtml(st){
+    if(!st)return '—';
+    return `<span class="oil-status oil-${st.estado.toLowerCase()}" title="${esc(st.titulo)} — ${esc(st.detalhe)}">${OIL_ICONE[st.estado]||'◉'} ${esc(oilStatusCurto(st))}</span>`
+      +`<small class="table-subtitle">${esc(oilStatusResumo(st))}</small>`;
+  }
+  // Ordem de urgência: vencidas primeiro, depois as que estão chegando no intervalo.
+  const OIL_PESO={VENCIDA:0,ATENCAO:1,SEM_REGISTRO:2,SEM_KM:3,OK:4};
+  function oilFleetSituation(){
+    vehicles=dedupeById(vehicles);
+    return vehicles.map(v=>({v, st:oilStatus(v)})).sort((a,b)=>
+      OIL_PESO[a.st.estado]-OIL_PESO[b.st.estado]||
+      (a.st.restante==null?Infinity:a.st.restante)-(b.st.restante==null?Infinity:b.st.restante)||
+      String(formatPlacaMercosul(a.v.placa)).localeCompare(String(formatPlacaMercosul(b.v.placa))));
+  }
+
   function toast(msg, tipo){
     const c=document.getElementById('toast-container'); if(!c)return;
     const t=document.createElement('div'); t.className='toast-msg '+ (tipo==='aviso'?'aviso':'success');
@@ -129,12 +227,17 @@ const App = (function() {
   }
 
   function maintenancePayload(m){
+    // v3.9.0 — troca de óleo sobe com a próxima troca já calculada (hodômetro + 10.000 km),
+    // inclusive quando o registro foi feito offline e fica na fila.
+    const isOil=String((m&&m.tipo)||'').toUpperCase()==='TROCA DE ÓLEO';
+    const km=Number(m&&m.hodometro);
+    const proxima=isOil&&Number.isFinite(km)&&km>0?km+OIL_INTERVAL_KM:(m.proxima_manutencao==null?null:Number(m.proxima_manutencao));
     return {
       vehicle_id:Number(m.vehicle_id),
       data:m.data||null,
       data_saida:m.data_saida||null,
       hodometro:m.hodometro==null?null:Number(m.hodometro),
-      proxima_manutencao:m.proxima_manutencao==null?null:Number(m.proxima_manutencao),
+      proxima_manutencao:proxima,
       tipo:(m.tipo||'PREVENTIVA').toUpperCase(),
       status_os:(m.status_os||'CONCLUÍDA').toUpperCase(),
       tipo_oleo:m.tipo_oleo||null,
@@ -147,6 +250,16 @@ const App = (function() {
       placa:m.placa||null
     };
   }
+  // v3.9.0 — o hodômetro do cadastro do veículo é o "km atual" usado nos avisos de
+  // troca de óleo. Uma OS lançada com km maior atualiza o veículo (nunca diminui);
+  // a API faz o mesmo no banco e aqui o espelho local já fica igual, sem esperar
+  // a próxima sincronização.
+  function registraKmVeiculo(vehicleId, hodometro){
+    const km=Number(hodometro); if(!Number.isFinite(km)||km<=0)return;
+    const v=vehicles.find(x=>Number(x.id)===Number(vehicleId)); if(!v)return;
+    if(km>(Number(v.hodometro)||0)){ v.hodometro=km; saveCache(); renderVehicles(); }
+  }
+
   function vehiclePayload(v){
     return {
       placa:v.placa,grupo:v.grupo,marca:v.marca,modelo:v.modelo,
@@ -208,7 +321,7 @@ const App = (function() {
         }
       }
     }finally{ flushingMaint=false; }
-    if(synced){ saveMaintCache(); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen(); }
+    if(synced){ saveMaintCache(); refreshMaintViews(); }
   }
 
   // ---------- Fila: flush dos veículos pendentes ----------
@@ -636,6 +749,16 @@ const App = (function() {
     const mt=document.getElementById('maint-tipo-filter'); if(mt)mt.addEventListener('change',renderMaintenance);
     const mst=document.getElementById('maint-status-filter'); if(mst)mst.addEventListener('change',renderMaintenance);
     const mto=document.getElementById('m-tipo'); if(mto)mto.addEventListener('change',toggleOilFields);
+    // v3.9.0 — troca de óleo: a próxima troca é calculada enquanto o hodômetro é digitado
+    const mkm=document.getElementById('m-hodometro'); if(mkm)mkm.addEventListener('input',syncOilNext);
+    const mv=document.getElementById('m-vehicle');
+    if(mv)mv.addEventListener('change',()=>{
+      const isOil=(document.getElementById('m-tipo')?.value||'').toUpperCase()==='TROCA DE ÓLEO';
+      const campo=document.getElementById('m-hodometro');
+      // Já veio km digitado? Só recalcula a próxima troca — não sobrescreve a leitura.
+      if(isOil&&campo&&String(campo.value).trim()==='')prefillOilKm(mv.value);
+      else syncOilNext();
+    });
     // Esc fecha o modal aberto (histórico, manutenção ou veículo)
     document.addEventListener('keydown',e=>{
       if(e.key!=='Escape')return;
@@ -746,6 +869,7 @@ const App = (function() {
     if(ba)ba.style.width=aP+'%'; if(bm)bm.style.width=mP+'%'; if(bo)bo.style.width=Math.max(0,oP)+'%';
     const la=document.getElementById('lbl-active'),lm=document.getElementById('lbl-maint'),lo=document.getElementById('lbl-other');
     if(la)la.textContent=act+' Operacionais'; if(lm)lm.textContent=man+' Em Manutenção'; if(lo)lo.textContent=Math.max(0,total-act-man)+' Outros';
+    renderOilAlerts(); // avisos de troca de óleo (card + selo no menu lateral)
   }
 
   function renderDashGroups(){
@@ -755,7 +879,15 @@ const App = (function() {
     g.innerHTML=ks.map(gr=>{
       const i=info(gr); const gv=vehicles.filter(v=>norm(v.grupo)===gr);
       // O cartão inteiro abre o histórico; a edição do veículo fica no botão de lápis.
-      const items=gv.map(v=>`<div class="dashboard-vehicle-item" role="button" tabindex="0" title="Ver histórico de manutenção de ${esc(formatPlacaMercosul(v.placa))}" aria-label="Ver histórico de manutenção de ${esc(formatPlacaMercosul(v.placa))}" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}\"><span class="dashboard-vehicle-topline"><span class="placa-click"><span class="placa-badge">${placaMarkup(formatPlacaMercosul(v.placa))}</span><span class="placa-wrench" aria-hidden="true">🔧</span></span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong><span class="dashboard-vehicle-foot"><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span><button type="button" class="btn btn-sm btn-icon dashboard-vehicle-edit" title="Editar veículo" aria-label="Editar ${esc(formatPlacaMercosul(v.placa))}" onclick="event.stopPropagation();App.editVehicle(${Number(v.id)})">✏️</button></span></div>`).join('');
+      // A linha "Troca de óleo" (v3.9.0) mostra a próxima troca e fica colorida quando
+      // o veículo se aproxima do intervalo de 10.000 km ou passa dele.
+      const items=gv.map(v=>{
+        const st=oilStatus(v);
+        const placa=esc(formatPlacaMercosul(v.placa));
+        const oil=`<span class="dashboard-vehicle-oil oil-${st.estado.toLowerCase()}" title="${esc(st.titulo)} — ${esc(st.detalhe)}">${OIL_ICONE[st.estado]||'◉'} <b>${esc(oilStatusCurto(st))}</b> · ${esc(oilStatusResumo(st))}</span>`;
+        const faixa=st.estado==='VENCIDA'?' is-oil-vencida':(st.estado==='ATENCAO'?' is-oil-atencao':'');
+        return `<div class="dashboard-vehicle-item${faixa}" role="button" tabindex="0" title="Ver histórico de manutenção de ${placa}" aria-label="Ver histórico de manutenção de ${placa}" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}"><span class="dashboard-vehicle-topline"><span class="placa-click"><span class="placa-badge">${placaMarkup(formatPlacaMercosul(v.placa))}</span><span class="placa-wrench" aria-hidden="true">🔧</span></span><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></span><strong>${v.marca||''} ${v.modelo||''}</strong>${oil}<span class="dashboard-vehicle-foot"><span class="dashboard-vehicle-km">${(v.hodometro||0).toLocaleString('pt-BR')} km</span><button type="button" class="btn btn-sm btn-icon dashboard-vehicle-edit" title="Editar veículo" aria-label="Editar ${placa}" onclick="event.stopPropagation();App.editVehicle(${Number(v.id)})">✏️</button></span></div>`;
+      }).join('');
       return `<section class="fleet-group-module dashboard-group-module ${i.cls}"><div class="fleet-group-header"><div class="fleet-group-heading"><span class="fleet-group-icon">${i.icon}</span><div><h4>${i.label}</h4><span>Visão rápida</span></div></div><span class="fleet-group-count">${gv.length} veículo(s)</span></div><div class="dashboard-vehicle-list">${items}</div></section>`;
     }).join('');
   }
@@ -928,9 +1060,11 @@ const App = (function() {
     const oil=todos.filter(m=>(m.tipo||'').toUpperCase()==='TROCA DE ÓLEO').length;
     const ultima=sorted[0];
     const proximaKm=sorted.map(m=>Number(m.proxima_manutencao)).filter(n=>n>0).sort((a,b)=>b-a)[0]||null;
+    const stOil=oilStatus(v); // v3.9.0 — próxima troca de óleo (intervalo fixo de 10.000 km)
     const chips=[
       `<span class="report-chip"><b>${todos.length}</b> ${todos.length===1?'manutenção':'manutenções'}</span>`,
       `<span class="report-chip"><b>${oil}</b> ${oil===1?'troca de óleo':'trocas de óleo'}</span>`,
+      `<span class="report-chip oil-chip oil-${stOil.estado.toLowerCase()}" title="${esc(stOil.detalhe)}"><b>${OIL_ICONE[stOil.estado]||'◉'} ${esc(oilStatusCurto(stOil))}</b> ${esc(oilStatusResumo(stOil))}</span>`,
       `<span class="report-chip"><b>${money(todos.reduce((s,m)=>s+Number(m.custo||0),0))}</b> custo acumulado</span>`,
       `<span class="report-chip"><b>${ultima?dateLabel(ultima.data):'—'}</b> última manutenção</span>`,
       proximaKm?`<span class="report-chip"><b>${proximaKm.toLocaleString('pt-BR')} km</b> próxima programada</span>`:''
@@ -981,8 +1115,13 @@ const App = (function() {
     document.getElementById('vehicle-count').textContent=`${filt.length} de ${vehicles.length}`;
     document.getElementById('vehicles-groups').innerHTML=keys().map(gr=>{
       const i=info(gr); const gv=filt.filter(v=>norm(v.grupo)===gr);
-      const rows=gv.map(v=>`<tr><td><span class="placa-click" role="button" tabindex="0" title="Ver histórico de manutenção e troca de óleo" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}"><span class="placa-badge">${placaMarkup(formatPlacaMercosul(v.placa))}</span></span></td><td><b>${v.marca||''}</b> ${v.modelo||''}</td><td>${v.ano||'-'}</td><td><b>${(v.hodometro||0).toLocaleString('pt-BR')} km</b></td><td><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></td><td>${v.combustivel||'-'}</td><td><button class="btn btn-sm btn-primary" onclick="App.editVehicle(${v.id})">✏️</button><button class="btn btn-sm btn-danger" onclick="App.deleteVehicle(${v.id})">🗑️</button></td></tr>`).join('');
-      return `<section class="fleet-group-module ${i.cls}"><div class="fleet-group-header"><div class="fleet-group-heading"><span class="fleet-group-icon">${i.icon}</span><div><h4>${i.label}</h4><span>Veículos do grupo</span></div></div><span class="fleet-group-count">${gv.length}</span></div><div class="fleet-group-content table-responsive"><table class="data-table"><thead><tr><th>Placa</th><th>Marca/Modelo</th><th>Ano</th><th>KM</th><th>Status</th><th>Combustível</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty-state">Nenhum veículo</td></tr>'}</tbody></table></div></section>`;
+      const rows=gv.map(v=>{
+        // v3.9.0 — coluna com a situação da troca de óleo (próxima troca / vencimento)
+        const st=oilStatus(v);
+        const acoes=`<button class="btn btn-sm btn-primary" title="Registrar troca de óleo" onclick="App.openMaintenanceModal('TROCA DE ÓLEO', ${Number(v.id)})">◉</button><button class="btn btn-sm btn-primary" title="Editar veículo" onclick="App.editVehicle(${Number(v.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir veículo" onclick="App.deleteVehicle(${Number(v.id)})">🗑️</button>`;
+        return `<tr><td><span class="placa-click" role="button" tabindex="0" title="Ver histórico de manutenção e troca de óleo" onclick="App.openVehicleHistory(event, ${Number(v.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}"><span class="placa-badge">${placaMarkup(formatPlacaMercosul(v.placa))}</span></span></td><td><b>${v.marca||''}</b> ${v.modelo||''}</td><td>${v.ano||'-'}</td><td><b>${(v.hodometro||0).toLocaleString('pt-BR')} km</b></td><td>${oilBadgeHtml(st)}</td><td><span class="badge ${badge(v.status)}">${v.status||'ATIVO'}</span></td><td>${v.combustivel||'-'}</td><td>${acoes}</td></tr>`;
+      }).join('');
+      return `<section class="fleet-group-module ${i.cls}"><div class="fleet-group-header"><div class="fleet-group-heading"><span class="fleet-group-icon">${i.icon}</span><div><h4>${i.label}</h4><span>Veículos do grupo</span></div></div><span class="fleet-group-count">${gv.length}</span></div><div class="fleet-group-content table-responsive"><table class="data-table"><thead><tr><th>Placa</th><th>Marca/Modelo</th><th>Ano</th><th>KM</th><th>Troca de óleo</th><th>Status</th><th>Combustível</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty-state">Nenhum veículo</td></tr>'}</tbody></table></div></section>`;
     }).join('');
   }
 
@@ -1017,9 +1156,46 @@ const App = (function() {
     list.innerHTML=`<table class="data-table"><thead><tr><th>Data</th><th>Veículo</th><th>Tipo</th><th>Serviço</th><th>Hodômetro</th><th>Status</th><th>Custo</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty-state">Nenhuma manutenção encontrada para os filtros selecionados.</td></tr>'}</tbody></table>`;
   }
 
+  // v3.9.0 — o campo "Próxima troca" é CALCULADO na troca de óleo: hodômetro + 10.000 km.
+  // O valor alimenta o aviso de vencimento no Painel Geral / Veículos e é enviado como
+  // proxima_manutencao (a API aplica a mesma regra, então nunca entra valor divergente).
+  function syncOilNext(){
+    const tipo=(document.getElementById('m-tipo')?.value||'').toUpperCase();
+    if(tipo!=='TROCA DE ÓLEO')return;
+    const kmInformado=Number(document.getElementById('m-hodometro')?.value);
+    const campo=document.getElementById('m-proxima');
+    const previa=document.getElementById('m-oil-schedule');
+    const valido=Number.isFinite(kmInformado)&&kmInformado>0;
+    if(campo)campo.value=valido?String(kmInformado+OIL_INTERVAL_KM):'';
+    if(previa){
+      previa.innerHTML=valido
+        ? `🔧 Próxima troca programada para <b>${kmLabel(kmInformado+OIL_INTERVAL_KM)}</b> — intervalo fixo de ${kmLabel(OIL_INTERVAL_KM)}.`
+        : `Informe o hodômetro para calcular a próxima troca (hodômetro + ${kmLabel(OIL_INTERVAL_KM)}).`;
+    }
+  }
+
   function toggleOilFields(){
     const tipo=(document.getElementById('m-tipo')?.value||'').toUpperCase();
-    document.querySelectorAll('#maintenance-form .oil-only').forEach(el=>{ el.style.display = tipo==='TROCA DE ÓLEO' ? '' : 'none'; });
+    const isOil=tipo==='TROCA DE ÓLEO';
+    // O atributo hidden + a regra CSS "#maintenance-form .oil-only[hidden]{display:none!important}"
+    // vencem o display:flex do .form-field — antes o CSS fixo escondia os campos de óleo
+    // mesmo quando o JS tentava mostrá-los (display:'' não sobrepõe a regra).
+    document.querySelectorAll('#maintenance-form .oil-only').forEach(el=>{ el.hidden=!isOil; });
+    const label=document.getElementById('m-proxima-label');
+    if(label)label.textContent=isOil?`Próxima troca (km) — hodômetro + ${OIL_INTERVAL_KM.toLocaleString('pt-BR')} km`:'Próxima manutenção (km)';
+    const campo=document.getElementById('m-proxima');
+    if(campo){ campo.readOnly=isOil; campo.classList.toggle('field-readonly',isOil); campo.title=isOil?'Calculado automaticamente: hodômetro + intervalos de 10.000 km entre trocas.':''; }
+    syncOilNext();
+  }
+
+  // Pré-preenche o hodômetro com o km do cadastro ao registrar troca de óleo
+  // (o operador só confirma/corrige a leitura do painel).
+  function prefillOilKm(vehicleId){
+    const campo=document.getElementById('m-hodometro'); if(!campo)return;
+    const v=vehicles.find(x=>Number(x.id)===Number(vehicleId));
+    const km=Number(v?.hodometro)||0;
+    if(km>0)campo.value=String(km);
+    syncOilNext();
   }
 
   function vehicleOptions(selected){
@@ -1038,6 +1214,7 @@ const App = (function() {
     if(select){ select.innerHTML=vehicleOptions(vehicleId||''); select.value=vehicleId||''; }
     const tipo=document.getElementById('m-tipo');
     if(tipo){ tipo.disabled=false; tipo.value=preset||'PREVENTIVA'; if(preset==='TROCA DE ÓLEO')tipo.disabled=true; }
+    if(preset==='TROCA DE ÓLEO'&&vehicleId)prefillOilKm(vehicleId);
     toggleOilFields();
     document.getElementById('maintenance-modal').classList.add('active');
   }
@@ -1080,6 +1257,29 @@ const App = (function() {
     data.tipo_oleo=(data.tipo_oleo||'').trim().toUpperCase()||null;
     if(data.tipo==='TROCA DE ÓLEO'){ if(!data.servico) data.servico='Troca de óleo'; }
     else if(!data.servico){ return alert('Informe o serviço/descrição da manutenção.'); }
+
+    // v3.9.0 — INTERVALO FIXO DE 10.000 KM ENTRE TROCAS DE ÓLEO.
+    //  • a próxima troca é sempre hodômetro + 10.000 km (o campo é calculado);
+    //  • lançar uma nova troca antes de completar o intervalo dos 10.000 km pede
+    //    confirmação (não bloqueia: troca antecipada pode ser necessária), e um
+    //    hodômetro MENOR que a última troca é recusado por ser dado inconsistente.
+    let avisoIntervalo='';
+    if(data.tipo==='TROCA DE ÓLEO'){
+      const veiculo=vehicles.find(x=>Number(x.id)===Number(data.vehicle_id));
+      const anterior=oilStatus(veiculo, editingMaintenance); // ignora o próprio registro ao editar
+      if(anterior.baseKm!=null&&data.hodometro!=null){
+        const rodado=data.hodometro-anterior.baseKm;
+        if(rodado<0){
+          return alert(`O hodômetro informado (${kmLabel(data.hodometro)}) é menor que o da última troca de óleo deste veículo (${kmLabel(anterior.baseKm)}, em ${dateLabel(anterior.ultima?.data)}).\n\nCorrija o hodômetro para registrar a troca.`);
+        }
+        if(rodado<OIL_INTERVAL_KM){
+          const faltam=OIL_INTERVAL_KM-rodado;
+          if(!confirm(`Esta troca está sendo lançada com ${kmLabel(rodado)} desde a última troca (${kmLabel(anterior.baseKm)}).\n\nO intervalo padrão é de ${kmLabel(OIL_INTERVAL_KM)} — ainda faltariam ${kmLabel(faltam)}.\n\nRegistrar a troca de óleo mesmo assim?`))return;
+          avisoIntervalo=`Troca antecipada: ${kmLabel(rodado)} desde a última (intervalo de ${kmLabel(OIL_INTERVAL_KM)}). `;
+        }
+      }
+      if(data.hodometro!=null&&data.hodometro>0)data.proxima_manutencao=data.hodometro+OIL_INTERVAL_KM;
+    }
     // v3.8.5 — EDIÇÃO 100% ONLINE. Duas situações que antes faziam a edição
     // cair em modo offline com o aviso "Sem conexão com a API":
     //  1) o registro editado ainda NÃO existe no banco (criado neste
@@ -1121,9 +1321,13 @@ const App = (function() {
       maintenances=maintenances.filter(x=>Number(x.id)!==Number(editingMaintenance)&&Number(x.id)!==Number(saved?.id));
       maintenances.unshift(saved);
       maintenances=dedupeById(maintenances);
-      saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
+      registraKmVeiculo(data.vehicle_id, data.hodometro); // km do cadastro acompanha a OS
+      saveMaintCache(); closeModal('maintenance-modal'); refreshMaintViews();
       if(loadQueue().length) flushMaintenanceQueue(); // aproveita para drenar a fila
-      toast(data.tipo==='TROCA DE ÓLEO'?'Troca de óleo salva!':'Manutenção salva!'); return;
+      toast(data.tipo==='TROCA DE ÓLEO'
+        ? `${avisoIntervalo}Troca de óleo salva! ${data.proxima_manutencao>0?`Próxima troca programada para ${kmLabel(data.proxima_manutencao)}.`:`Informe o hodômetro na próxima para programar o intervalo de ${kmLabel(OIL_INTERVAL_KM)}.`}`
+        : 'Manutenção salva!');
+      return;
     }catch(e){
       if(!isOfflineError(e)){ toast('Não foi possível salvar: '+e.message,'aviso'); return; }
       online=false; setConnStatus(false); // API fora do ar
@@ -1142,6 +1346,7 @@ const App = (function() {
       maintenances.unshift(local);
     }
     maintenances=dedupeById(maintenances);
+    registraKmVeiculo(data.vehicle_id, data.hodometro); // km do cadastro acompanha a OS
     const q=loadQueue();
     const entry=local._op==='update'
       ?{op:'update',id:local.id,payload:maintenancePayload(local)}
@@ -1151,7 +1356,7 @@ const App = (function() {
       :q.findIndex(x=>x.op==='create'&&Number(x.localId)===Number(local.id));
     if(qi>=0)q[qi]=entry; else q.push(entry);
     saveQueue(q);
-    saveMaintCache(); closeModal('maintenance-modal'); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
+    saveMaintCache(); closeModal('maintenance-modal'); refreshMaintViews();
     toast('Sem conexão com a API — registro salvo neste dispositivo e será sincronizado automaticamente assim que a conexão voltar.','aviso');
     scheduleHeartbeat(2000);
   }
@@ -1165,7 +1370,7 @@ const App = (function() {
     try{
       await api('/manutencoes/'+id,{method:'DELETE'});
       maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));
-      saveMaintCache(); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
+      saveMaintCache(); refreshMaintViews();
       if(loadQueue().length) flushMaintenanceQueue(); // aproveita para drenar a fila
       toast('Registro excluído!'); return;
     }catch(e){
@@ -1180,7 +1385,7 @@ const App = (function() {
         const descartouEdicao=q.some(x=>x.op==='update'&&Number(x.id)===Number(id));
         saveQueue(q.filter(x=>!(Number(x.id)===Number(id)&&(x.op==='delete'||x.op==='update'))));
         maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));
-        saveMaintCache(); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
+        saveMaintCache(); refreshMaintViews();
         toast('Registro já não existe no servidor — removido da tela.'+(descartouEdicao?' A edição pendente dele foi descartada.':''),'aviso');
         return;
       }
@@ -1203,14 +1408,97 @@ const App = (function() {
       toast((foraDaApi?avisoForaDaApi:'')+'Exclusão enfileirada neste dispositivo — será repetida automaticamente assim que a API responder.','aviso');
     }
     maintenances=maintenances.filter(x=>Number(x.id)!==Number(id));
-    saveMaintCache(); renderMaintenance(); renderOilChanges(); refreshHistoryIfOpen();
+    saveMaintCache(); refreshMaintViews();
     scheduleHeartbeat(2000);
   }
 
   // ============ TROCA DE ÓLEO (visão ligada à Manutenção) ============
 
+  // Redesenha tudo que depende das manutenções: tabelas, avisos de troca de óleo
+  // do Painel Geral / Veículos e o histórico que estiver aberto.
+  function refreshMaintViews(){
+    renderMaintenance(); renderOilChanges(); renderDashboard(); refreshHistoryIfOpen();
+  }
+
+  // ---------- Avisos de troca de óleo (Painel Geral + menu lateral) ----------
+  function renderOilAlerts(){
+    const situacao=oilFleetSituation();
+    const atencao=situacao.filter(x=>x.st.estado!=='OK');
+    const contar=e=>atencao.filter(x=>x.st.estado===e).length;
+    const vencidas=contar('VENCIDA'), proximas=contar('ATENCAO'), semRegistro=contar('SEM_REGISTRO'), semKm=contar('SEM_KM');
+
+    // Selo com o total de veículos pedindo atenção no item "Troca de Óleo" do menu
+    const nav=document.getElementById('nav-oil-badge');
+    if(nav){
+      nav.hidden=atencao.length===0;
+      nav.textContent=String(atencao.length);
+      nav.title=`${vencidas} vencida(s) · ${proximas} próxima(s) · ${semRegistro+semKm} sem troca registrada`;
+    }
+
+    const resumoEl=document.getElementById('oil-alert-summary');
+    if(resumoEl){
+      const partes=[
+        vencidas?`<b>${vencidas}</b> ${vencidas===1?'vencida':'vencidas'}`:'',
+        proximas?`<b>${proximas}</b> ${proximas===1?'próxima':'próximas'}`:'',
+        semRegistro?`<b>${semRegistro}</b> sem troca registrada`:'',
+        semKm?`<b>${semKm}</b> sem hodômetro`:'',
+        atencao.length?'':'<b>tudo em dia</b>'
+      ].filter(Boolean).join(' · ');
+      resumoEl.innerHTML=partes;
+      resumoEl.className='oil-alert-summary '+(vencidas?'is-danger':(proximas?'is-warning':'is-ok'));
+    }
+
+    const lista=document.getElementById('oil-alert-list'); if(!lista)return;
+    if(!atencao.length){
+      lista.innerHTML=`<p class="oil-alert-empty">✅ Nenhum veículo com troca de óleo vencida ou próxima do intervalo de ${kmLabel(OIL_INTERVAL_KM)}.</p>`;
+      return;
+    }
+    const MAX=10;
+    const itens=atencao.slice(0,MAX).map(({v,st})=>{
+      const placa=formatPlacaMercosul(v.placa);
+      const model=`${v.marca||''} ${v.modelo||''}`.trim();
+      return `<div class="oil-alert-item oil-${st.estado.toLowerCase()}" role="button" tabindex="0"
+          title="${esc(st.titulo)} — ${esc(st.detalhe)} Clique para ver o histórico do veículo."
+          onclick="App.openVehicleHistory(event, ${Number(v.id)})"
+          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();App.openVehicleHistory(event, ${Number(v.id)});}">
+        <span class="placa-badge">${placaMarkup(placa)}</span>
+        <span class="oil-alert-item-body">
+          <strong>${OIL_ICONE[st.estado]||'◉'} ${esc(oilStatusCurto(st))}</strong>
+          <small>${esc(st.detalhe)}</small>
+          <small class="oil-alert-item-model">${esc(model||'Veículo')} · hodômetro ${kmLabel(st.kmAtual)}</small>
+        </span>
+        <button type="button" class="btn btn-sm oil-alert-item-action" title="Registrar troca de óleo para ${esc(placa)}"
+          onclick="event.stopPropagation();App.openMaintenanceModal('TROCA DE ÓLEO', ${Number(v.id)})">◉ Trocar</button>
+      </div>`;
+    }).join('');
+    lista.innerHTML=itens+(atencao.length>MAX?`<p class="oil-alert-more">+ ${atencao.length-MAX} outro(s) veículo(s) — veja a lista completa em <b>Troca de Óleo</b>.</p>`:'');
+  }
+
+  // ---------- Situação da frota (página Troca de Óleo) ----------
+  function renderOilSituation(){
+    const list=document.getElementById('oil-situation-list'); if(!list)return;
+    const situacao=oilFleetSituation();
+    const vencidas=situacao.filter(x=>x.st.estado==='VENCIDA').length;
+    const proximas=situacao.filter(x=>x.st.estado==='ATENCAO').length;
+    const countEl=document.getElementById('oil-situation-count');
+    if(countEl)countEl.textContent=`${vencidas} vencida(s) · ${proximas} próxima(s) · ${situacao.length} veículo(s) · intervalo de ${kmLabel(OIL_INTERVAL_KM)}`;
+    const rows=situacao.map(({v,st})=>{
+      const placa=formatPlacaMercosul(v.placa);
+      const model=`${v.marca||''} ${v.modelo||''}`.trim();
+      const ultima=st.ultima?`${dateLabel(st.ultima.data)}<small class="table-subtitle">${kmLabel(st.baseKm)}</small>`:'<span class="report-muted">—</span>';
+      return `<tr><td>${placaLink({vehicle_id:v.id,placa:v.placa},v.placa)}<small class="table-subtitle">${esc(model||'Veículo')}</small></td>
+        <td>${ultima}</td>
+        <td>${kmLabel(st.kmAtual)}</td>
+        <td>${st.proximaKm?kmLabel(st.proximaKm):'<span class="report-muted">—</span>'}${st.estado==='VENCIDA'||st.estado==='ATENCAO'?`<small class="table-subtitle">${esc(oilStatusResumo(st))}</small>`:''}</td>
+        <td>${oilBadgeHtml(st)}</td>
+        <td><button type="button" class="btn btn-sm btn-primary" title="Registrar troca de óleo para ${esc(placa)}" onclick="App.openMaintenanceModal('TROCA DE ÓLEO', ${Number(v.id)})">◉ Registrar troca</button></td></tr>`;
+    }).join('');
+    list.innerHTML=`<table class="data-table"><thead><tr><th>Veículo</th><th>Última troca</th><th>Hodômetro</th><th>Próxima troca</th><th>Situação</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="empty-state">Nenhum veículo cadastrado.</td></tr>'}</tbody></table>`;
+  }
+
   function renderOilChanges(){
     maintenances=dedupeById(maintenances);
+    renderOilSituation();
     const monthEl=document.getElementById('oil-month-filter');
     const month=monthEl?.value||'';
     const search=(document.getElementById('oil-search')?.value||'').toLowerCase().trim();
@@ -1224,14 +1512,31 @@ const App = (function() {
     const litersEl=document.getElementById('oil-summary-liters'); if(litersEl)litersEl.textContent=filtered.reduce((sum,x)=>sum+Number(x.quantidade||0),0).toLocaleString('pt-BR',{maximumFractionDigits:2});
     const countEl=document.getElementById('oil-count'); if(countEl)countEl.textContent=`${filtered.length} registro(s)`;
     const list=document.getElementById('oil-changes-list'); if(!list)return;
+    // Situação atual de cada veículo listado: serve para destacar, na coluna
+    // "Próxima troca", o registro que hoje é a referência do intervalo.
+    const situacaoPorVeiculo=new Map();
+    filtered.forEach(item=>{
+      if(item.vehicle_id==null)return;
+      const v=vehicles.find(x=>Number(x.id)===Number(item.vehicle_id));
+      if(v&&!situacaoPorVeiculo.has(Number(v.id)))situacaoPorVeiculo.set(Number(v.id),oilStatus(v));
+    });
     const rows=filtered.map(item=>{
       const v=vehicles.find(x=>Number(x.id)===Number(item.vehicle_id));
       const plate=item.placa||v?.placa||'-';
       const model=v?`${v.marca||''} ${v.modelo||''}`.trim():'Veículo cadastrado';
       const quantity=item.quantidade==null?'-':`${Number(item.quantidade).toLocaleString('pt-BR',{maximumFractionDigits:2})} L`;
-      return `<tr><td>${dateLabel(item.data)}</td><td>${placaLink(item,plate)}<small class="table-subtitle">${esc(model)}</small></td><td>${esc(item.tipo_oleo||'-')}</td><td>${item.hodometro==null?'-':`${Number(item.hodometro).toLocaleString('pt-BR')} km`}</td><td>${quantity}</td><td>${esc(item.observacoes||'-')}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(item.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(item.id)})">🗑️</button></td></tr>`;
+      const hodometro=Number(item.hodometro)>0?Number(item.hodometro):null;
+      const proximaKm=Number(item.proxima_manutencao)>0?Number(item.proxima_manutencao)
+        :(hodometro?hodometro+OIL_INTERVAL_KM:null); // registros antigos: recalcula pelo intervalo fixo
+      const st=situacaoPorVeiculo.get(Number(item.vehicle_id));
+      const isReferencia=!!(st&&st.ultima&&Number(st.ultima.id)===Number(item.id));
+      const alerta=isReferencia&&(st.estado==='VENCIDA'||st.estado==='ATENCAO');
+      const proximaTxt=proximaKm?kmLabel(proximaKm):'-';
+      const proximaSub=alerta?`<small class="table-subtitle oil-${st.estado.toLowerCase()}">${esc(oilStatusResumo(st))}</small>`
+        :(isReferencia?'<small class="table-subtitle">referência atual</small>':'');
+      return `<tr><td>${dateLabel(item.data)}</td><td>${placaLink(item,plate)}<small class="table-subtitle">${esc(model)}</small></td><td>${esc(item.tipo_oleo||'-')}</td><td>${item.hodometro==null?'-':`${Number(item.hodometro).toLocaleString('pt-BR')} km`}</td><td>${proximaTxt}${proximaSub}</td><td>${quantity}</td><td>${esc(item.observacoes||'-')}</td><td><button class="btn btn-sm btn-primary" title="Editar" onclick="App.editMaintenance(${Number(item.id)})">✏️</button><button class="btn btn-sm btn-danger" title="Excluir" onclick="App.deleteMaintenance(${Number(item.id)})">🗑️</button></td></tr>`;
     }).join('');
-    list.innerHTML=`<table class="data-table"><thead><tr><th>Data</th><th>Veículo</th><th>Óleo</th><th>Hodômetro</th><th>Quantidade</th><th>Observações</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty-state">Nenhuma troca de óleo encontrada para os filtros selecionados.</td></tr>'}</tbody></table>`;
+    list.innerHTML=`<table class="data-table"><thead><tr><th>Data</th><th>Veículo</th><th>Óleo</th><th>Hodômetro</th><th>Próxima troca</th><th>Quantidade</th><th>Observações</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty-state">Nenhuma troca de óleo encontrada para os filtros selecionados.</td></tr>'}</tbody></table>`;
   }
 
   async function loadOilReport(){

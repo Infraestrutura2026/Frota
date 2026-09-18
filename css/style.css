@@ -569,10 +569,81 @@ a:focus-visible,
 .report-chip b { margin-right: 4px; }
 .report-muted,
 .report-loading { color: var(--text-muted); font-size: .82rem; }
+
+/* ============ TROCA DE ÓLEO — INTERVALO DE 10.000 KM (v3.9.0) ============ */
+/* Selo de pendências no item "Troca de Óleo" do menu lateral */
+.nav-badge { margin-left: auto; padding: 2px 8px; border-radius: 999px; color: #fff; background: var(--danger); font-size: .66rem; font-weight: 700; line-height: 1.5; }
+
+/* Situação da troca de óleo (badge usada nas tabelas de Veículos / Troca de Óleo) */
+.oil-status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: .7rem; font-weight: 700; white-space: nowrap; }
+.oil-status.oil-ok { color: var(--success); background: var(--success-soft); }
+.oil-status.oil-atencao { color: #92400e; background: var(--warning-soft); }
+.oil-status.oil-vencida { color: var(--danger); background: var(--danger-soft); }
+.oil-status.oil-sem_registro,
+.oil-status.oil-sem_km { color: var(--text-muted); background: #f1f5f9; }
+.table-subtitle.oil-atencao { color: var(--warning); font-weight: 700; }
+.table-subtitle.oil-vencida { color: var(--danger); font-weight: 700; }
+.report-chip.oil-chip.oil-ok { color: var(--success); background: var(--success-soft); }
+.report-chip.oil-chip.oil-atencao { color: #92400e; background: var(--warning-soft); }
+.report-chip.oil-chip.oil-vencida { color: var(--danger); background: var(--danger-soft); }
+.report-chip.oil-chip.oil-sem_registro,
+.report-chip.oil-chip.oil-sem_km { color: var(--text-muted); background: #f1f5f9; }
+
+/* Aviso no cartão do veículo (Painel Geral) */
+.dashboard-vehicle-oil { display: flex; align-items: center; padding: 5px 9px; border-radius: 8px; font-size: .73rem; line-height: 1.3; }
+.dashboard-vehicle-oil b { font-weight: 700; }
+.dashboard-vehicle-oil.oil-ok { color: var(--success); background: var(--success-soft); }
+.dashboard-vehicle-oil.oil-atencao { color: #92400e; background: var(--warning-soft); font-weight: 600; }
+.dashboard-vehicle-oil.oil-vencida { color: #991b1b; background: var(--danger-soft); font-weight: 600; }
+.dashboard-vehicle-oil.oil-sem_registro,
+.dashboard-vehicle-oil.oil-sem_km { color: var(--text-muted); background: #f1f5f9; }
+/* faixa colorida no cartão inteiro quando o veículo está perto de vencer / vencido */
+.dashboard-vehicle-item.is-oil-atencao { border-left: 4px solid var(--warning); }
+.dashboard-vehicle-item.is-oil-vencida { border-left: 4px solid var(--danger); }
+
+/* Card de avisos do Painel Geral */
+.oil-alert-card { display: flex; flex-direction: column; gap: 12px; }
+.oil-alert-note { color: var(--text-muted); font-size: .78rem; line-height: 1.45; }
+.oil-alert-note b { color: var(--navy); }
+.oil-alert-summary { padding: 5px 12px; border-radius: 999px; color: var(--text-muted); background: #f1f5f9; font-size: .75rem; font-weight: 700; text-align: center; }
+.oil-alert-summary.is-ok { color: var(--success); background: var(--success-soft); }
+.oil-alert-summary.is-warning { color: #92400e; background: var(--warning-soft); }
+.oil-alert-summary.is-danger { color: var(--danger); background: var(--danger-soft); }
+.oil-alert-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 10px; }
+.oil-alert-item { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 10px; background: #fff; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.oil-alert-item:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(29, 78, 216, .15); }
+.oil-alert-item.oil-vencida { border-left-color: var(--danger); background: #fff7f7; }
+.oil-alert-item.oil-atencao { border-left-color: var(--warning); background: #fffdf5; }
+.oil-alert-item.oil-sem_registro,
+.oil-alert-item.oil-sem_km { border-left-color: #94a3b8; background: #fbfdff; }
+.oil-alert-item-body { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.oil-alert-item-body strong { color: var(--navy); font-size: .82rem; }
+.oil-alert-item.oil-vencida .oil-alert-item-body strong { color: var(--danger); }
+.oil-alert-item.oil-atencao .oil-alert-item-body strong { color: var(--warning); }
+.oil-alert-item-body small { color: var(--text-muted); font-size: .72rem; }
+.oil-alert-item-body small.oil-alert-item-model { font-size: .68rem; }
+.oil-alert-item-action { flex: none; }
+.oil-alert-item:hover .oil-alert-item-action { border-color: var(--primary); color: var(--primary-dark); }
+.oil-alert-more { color: var(--text-muted); font-size: .78rem; }
+.oil-alert-empty { padding: 4px 0; color: var(--success); font-size: .82rem; font-weight: 600; }
 .form-field-wide { grid-column: 1 / -1; }
 
-/* Campos exclusivos de Troca de Óleo no modal de Manutenção */
-.form-field.oil-only { display: none; }
+/* Campos exclusivos de Troca de Óleo no modal de Manutenção.
+   O JS liga/desliga pelo atributo hidden; sem o !important o display:flex do
+   .form-field venceria o hidden e os campos ficariam sempre visíveis. */
+.form-field.oil-only[hidden],
+.oil-only[hidden] { display: none !important; }
+
+/* Campo calculado (Próxima troca = hodômetro + 10.000 km): somente leitura */
+.form-field input.field-readonly {
+  border-color: #cbd5e1;
+  color: var(--navy);
+  background: #eef4ff;
+  font-weight: 700;
+  cursor: not-allowed;
+}
+.oil-schedule { padding: 9px 12px; border-radius: 9px; color: var(--primary-dark); background: var(--primary-soft); font-size: .76rem; line-height: 1.35; }
+.oil-schedule b { font-weight: 700; }
 
 /* ============ MODAL ============ */
 
