@@ -199,6 +199,14 @@ no banco.
 > sai com `proxima_manutencao = hodômetro + 10.000 km`, mesmo que o cliente
 > mande outro valor — ver a seção “Troca de óleo — intervalo fixo de 10.000 km e
 > aviso no painel”.
+
+> 🔢 **Placas exibidas como cadastradas (v3.9.2)**: o app **não converte mais** placas do
+> padrão antigo (`AAA9999`, ex.: `BRZ7720`) para o Mercosul (`AAA9A99`). A antiga conversão
+> automática criava placas que não existem nos veículos (a placa virava outra letra no meio:
+> `BRZ7720` → `BRZ7H20`) e embaralhava a frota nas telas, no histórico e na exportação CSV.
+> A placa agora é sempre mostrada exatamente como está no cadastro, apenas normalizada em
+> caixa alta e sem hífens/espaços — o que for digitado com hífen (`BRZ-7720`) é salvo e
+> exibido como `BRZ7720`. Placas Mercosul já cadastradas permanecem inalteradas.
 >
 > 🔒 Senhas ficam hasheadas (SHA-256) e nunca são retornadas pela API.
 > 🔎 **Diagnóstico de erros**: respostas 500 da API trazem a causa vinda do Postgres

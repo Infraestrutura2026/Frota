@@ -53,13 +53,15 @@ const App = (function() {
   function esc(value){ const d=document.createElement('div'); d.textContent=value==null?'':String(value); return d.innerHTML; }
   function dateLabel(value){ if(!value)return'-'; const parts=String(value).slice(0,10).split('-'); return parts.length===3?`${parts[2]}/${parts[1]}/${parts[0]}`:String(value); }
 
-  // Placa no padrão Mercosul (AAA9A99). Placas antigas (AAA9999) são convertidas
-  // pela regra oficial: o 2º dígito vira letra (0→A, 1→B … 9→J). Ex.: ABC1234 → ABC1C34.
+  // v3.9.2 — A "conversão" de placas antigas (AAA9999) para Mercosul (AAA9A99)
+  // foi REMOVIDA: ela inventava placas que não existem nos veículos (ex.:
+  // BRZ7720 aparecia como BRZ7H20) e bagunçava a frota na tela, no histórico,
+  // nos alertas e na exportação. Agora a placa é SEMPRE exibida exatamente como
+  // cadastrada — padrão antigo continua antigo (BRZ7720), Mercosul continua
+  // Mercosul (CUQ3I89) — apenas normalizada em caixa alta e sem hífens/espaços.
+  // O nome formatPlacaMercosul foi mantido por compatibilidade com os chamadores.
   function formatPlacaMercosul(p){
-    const s=String(p==null?'':p).toUpperCase().replace(/[^A-Z0-9]/g,'');
-    if(/^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(s))return s; // já é Mercosul
-    if(/^[A-Z]{3}[0-9]{4}$/.test(s))return s.slice(0,4)+'ABCDEFGHIJ'[Number(s.charAt(4))]+s.slice(5);
-    return s;
+    return String(p==null?'':p).toUpperCase().replace(/[^A-Z0-9]/g,'');
   }
 
   // Miolo visual da placa Mercosul (faixa BRASIL + caracteres), usado nos badges
