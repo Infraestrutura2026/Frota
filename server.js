@@ -1,7 +1,7 @@
 'use strict';
 
 // ============================================================
-// FROTA PRO v3.9.2 — Controle de Frota (grupos S2, S3 e S4)
+// FROTA PRO v3.10.0 — Controle de Frota (grupos S2, S3 e S4)
 // Servidor Node nativo: API REST + arquivos estáticos.
 //
 // Persistência:
@@ -98,6 +98,31 @@
 //    coluna "Troca de óleo" e a página Troca de Óleo ganhou a tabela "Situação
 //    da frota". O aviso fica amarelo a 1.000 km do vencimento e vermelho depois
 //    dos 10.000 km.
+//
+// v3.10.0 — MENU USUÁRIOS COM DOIS PERFIS (Administrador e Operador).
+// A criação de contas existia só na API: qualquer pessoa que soubesse a URL
+// podia listar, criar, promover e apagar usuários sem login nenhum. Agora o
+// módulo de usuários é uma área restrita do ADMINISTRADOR, nas duas pontas:
+//  • DOIS perfis, e só dois: `admin` (Administrador — acesso total, inclusive
+//    o menu "Usuários") e `operador` (Operador — veículos, manutenção e troca
+//    de óleo, sem nenhuma visão de contas). Papéis legados (`user`, vazio) são
+//    lidos como `operador`; um papel fora desse par é recusado com 400.
+//  • SESSÃO ASSINADA: o POST /api/login devolve um token HMAC-SHA256
+//    (`payload.assinatura`, validade de 12h) que o front envia em
+//    `Authorization: Bearer`. Sem estado — funciona em função serverless sem
+//    armazenar sessão. GET /api/session diz quem está logado.
+//  • /api/users (e o alias /api/usuarios) EXIGE administrador: listar, criar,
+//    editar e excluir devolvem 401 sem sessão válida e 403 para quem é
+//    Operador. GET /api/data (que traz usuários) também. O papel é conferido
+//    no BANCO a cada chamada, então rebaixar um administrador vale na hora —
+//    o token antigo não continua abrindo a área restrita.
+//  • TRAVAS ANTI-BLOQUEIO: não se pode apagar, desativar ou rebaixar a ÚLTIMA
+//    conta de Administrador ativa, nem excluir/desativar a própria conta.
+//    `usuario` é único (case-insensitive) e a senha mínima é de 6 caracteres.
+//  • front (index.html + js/app.js): item "Usuários" no menu lateral com a
+//    classe `admin-only` (só aparece para Administrador), página com resumo,
+//    busca, filtro por perfil, tabela e modal de criação/edição com os dois
+//    perfis em cartões; o chip do perfil aparece ao lado do nome no topo.
 // ============================================================
 
 const http = require('http');
@@ -111,7 +136,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-const VERSION = '3.9.2';
+const VERSION = '3.10.0';
 
 // v3.8.5 — id local "de timestamp" (Date.now(), sempre > 1e11): registro criado
 // no dispositivo enquanto a API estava fora do ar. Ele nunca existiu no banco e
@@ -211,6 +236,131 @@ function hashSenha(s) {
 const INITIAL_USERS = [
   { id: 1, nome: 'Administrador', usuario: 'admin', senha: sha256('admin2025'), role: 'admin', ativo: 1 }
 ];
+
+// ============================================================
+// v3.10.0 — Perfis de acesso (DOIS, e só dois)
+// ============================================================
+// `admin`    → ADMINISTRADOR: tudo o que o Operador faz + o menu "Usuários"
+//              (criar, editar, excluir contas e trocar perfis).
+// `operador` → OPERADOR: veículos, manutenção e troca de óleo. Não vê — e a
+//              API não entrega — nenhuma informação de contas.
+// Contas antigas gravadas como `user` (ou com o papel em branco) são lidas como
+// `operador`: o padrão é sempre o perfil SEM privilégio de usuários.
+const ROLE_ADMIN = 'admin';
+const ROLE_OPERADOR = 'operador';
+const ROLE_LABELS = { admin: 'Administrador', operador: 'Operador' };
+const ROLE_ALIASES = {
+  admin: ROLE_ADMIN, administrador: ROLE_ADMIN, administradora: ROLE_ADMIN, sysadmin: ROLE_ADMIN,
+  operador: ROLE_OPERADOR, operadora: ROLE_OPERADOR, operator: ROLE_OPERADOR,
+  user: ROLE_OPERADOR, usuario: ROLE_OPERADOR, usuário: ROLE_OPERADOR, comum: ROLE_OPERADOR
+};
+const SENHA_MIN = 6;
+
+function erroApi(mensagem, statusCode) { const e = new Error(mensagem); e.statusCode = statusCode; return e; }
+
+// Leitura tolerante: qualquer grafia conhecida do papel vira `admin`/`operador`.
+function normalizeRole(v) {
+  const t = String(v == null ? '' : v).trim().toLowerCase();
+  if (!t) return ROLE_OPERADOR;
+  return ROLE_ALIASES[t] || (t === ROLE_ADMIN ? ROLE_ADMIN : ROLE_OPERADOR);
+}
+function isRoleAdmin(v) { return normalizeRole(v) === ROLE_ADMIN; }
+
+// Escrita estrita: um papel fora do par é recusado em vez de virar Operador
+// calado (o administrador digitou algo que não existe e precisa saber).
+function roleDoBody(v) {
+  const t = String(v == null ? '' : v).trim().toLowerCase();
+  if (!t) return ROLE_OPERADOR;
+  if (ROLE_ALIASES[t]) return ROLE_ALIASES[t];
+  throw erroApi('Perfil inválido: use "admin" (Administrador) ou "operador" (Operador).', 400);
+}
+
+function ativoDoBody(v) {
+  if (v === undefined || v === null || v === '') return 1;
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  const t = String(v).trim().toLowerCase();
+  if (['0', 'false', 'nao', 'não', 'inativo', 'desativado', 'off'].includes(t)) return 0;
+  return 1;
+}
+
+// ============================================================
+// v3.10.0 — Sessão assinada (HMAC-SHA256, sem estado)
+// ============================================================
+// Em função serverless não há memória entre chamadas, então a sessão viaja no
+// próprio token: `base64url(payload).base64url(assinatura)`. A assinatura usa
+// AUTH_SECRET (defina em produção!) ou um segredo derivado do banco, estável
+// entre as instâncias — trocar o segredo apenas invalida as sessões abertas.
+const TOKEN_TTL_MS = Math.max(1, Number(process.env.AUTH_TOKEN_TTL_HOURS) || 12) * 3600 * 1000;
+const AUTH_SECRET = String(
+  process.env.AUTH_SECRET || process.env.SESSION_SECRET ||
+  sha256(`frota-pro::${DATABASE_URL || 'arquivo-local'}::${LEGACY_ADMIN_HASH}`)
+);
+
+function b64url(buf) {
+  return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(str) {
+  const t = String(str || '').replace(/-/g, '+').replace(/_/g, '/');
+  return Buffer.from(t + '='.repeat((4 - (t.length % 4)) % 4), 'base64').toString('utf8');
+}
+function assinar(corpo) { return b64url(crypto.createHmac('sha256', AUTH_SECRET).update(corpo).digest()); }
+
+function gerarToken(user) {
+  const corpo = b64url(JSON.stringify({
+    id: Number(user.id),
+    usuario: user.usuario,
+    role: normalizeRole(user.role),
+    iat: Date.now(),
+    exp: Date.now() + TOKEN_TTL_MS
+  }));
+  return `${corpo}.${assinar(corpo)}`;
+}
+
+// Devolve o payload da sessão ou null (assinatura inválida, token adulterado,
+// expirado ou fora do formato). A comparação da assinatura é em tempo constante.
+function validarToken(tokenBruto) {
+  const t = String(tokenBruto == null ? '' : tokenBruto).trim().replace(/^Bearer\s+/i, '');
+  if (!t || !t.includes('.') || t.length > 600) return null;
+  const [corpo, sig] = t.split('.');
+  if (!corpo || !sig) return null;
+  const esperado = Buffer.from(assinar(corpo));
+  const recebido = Buffer.from(sig);
+  if (esperado.length !== recebido.length || !crypto.timingSafeEqual(esperado, recebido)) return null;
+  let payload;
+  try { payload = JSON.parse(b64urlDecode(corpo)); } catch (_) { return null; }
+  if (!payload || !Number.isFinite(payload.exp) || payload.exp <= Date.now()) return null;
+  return payload;
+}
+
+function tokenDaRequisicao(req) {
+  const h = (req && req.headers) || {};
+  const auth = String(primeiroValor(h['authorization']) || '').replace(/^Bearer\s+/i, '').trim();
+  if (auth) return auth;
+  return String(primeiroValor(h['x-frota-token']) || '').trim();
+}
+
+// Sessão válida E conferida no banco: o papel pode ter mudado depois do login
+// (um administrador rebaixado não pode continuar mandando na área de usuários
+// até o token expirar), e conta excluída/desativada perde o acesso na hora.
+async function exigirSessao(req) {
+  const token = tokenDaRequisicao(req);
+  if (!token) throw erroApi('Faça login para continuar.', 401);
+  const sessao = validarToken(token);
+  if (!sessao) throw erroApi('Sessão expirada ou inválida — saia e entre novamente.', 401);
+  const users = await listUsers();
+  const atual = users.find((u) => Number(u.id) === Number(sessao.id));
+  if (!atual || Number(atual.ativo) !== 1) throw erroApi('Conta inativa ou removida — faça login novamente.', 401);
+  return { sessao, usuario: usuarioPublico(atual) };
+}
+
+// Portão da área de usuários: 401 sem sessão, 403 para quem não é Administrador.
+async function exigirAdmin(req) {
+  const { sessao, usuario } = await exigirSessao(req);
+  if (!isRoleAdmin(usuario.role)) {
+    throw erroApi('Acesso negado: o menu Usuários é exclusivo do perfil Administrador.', 403);
+  }
+  return { sessao, usuario };
+}
 
 function intOrNull(v) { const n = parseInt(v, 10); return Number.isNaN(n) ? null : n; }
 function nextId(arr) { return arr.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1; }
@@ -1008,16 +1158,30 @@ async function seedVehicles() {
   return true;
 }
 
+// v3.10.0 — validação do nome de login. Só vale para usuário NOVO ou RENOMEADO:
+// contas antigas com outro formato continuam existindo e sendo editáveis.
+const FORMATO_USUARIO = /^[A-Za-z0-9._@-]{3,30}$/;
+function validarLoginUsuario(valor) {
+  const t = String(valor || '').trim();
+  if (!t) throw erroApi('Nome, usuário e senha são obrigatórios.', 400);
+  if (!FORMATO_USUARIO.test(t)) {
+    throw erroApi('Usuário inválido: use de 3 a 30 caracteres, sem espaços (letras, números, ponto, hífen, @ ou _).', 400);
+  }
+  return t;
+}
+
 async function insertUser(body, idPreferido = null) {
   body = body || {};
-  const u = {
-    nome: String(body.nome || '').trim(),
-    usuario: String(body.usuario || '').trim(),
-    senha: hashSenha(body.senha),
-    role: String(body.role || 'user'),
-    ativo: body.ativo === undefined ? 1 : intOrNull(body.ativo) ?? 1
-  };
-  if (!u.nome || !u.usuario || !u.senha) { const e = new Error('Nome, usuário e senha são obrigatórios.'); e.statusCode = 400; throw e; }
+  const role = roleDoBody(body.role);        // 400 para perfil fora do par admin/operador
+  const ativo = ativoDoBody(body.ativo);
+  const nome = String(body.nome || '').trim();
+  const usuario = validarLoginUsuario(body.usuario);
+  if (!nome) throw erroApi('Nome, usuário e senha são obrigatórios.', 400);
+  validarSenhaNova(body.senha);
+  const senha = hashSenha(body.senha);
+  if (!senha) throw erroApi('Nome, usuário e senha são obrigatórios.', 400);
+  if (await usuarioJaExiste(usuario)) throw erroApi(`Já existe uma conta com o usuário "${usuario}".`, 409);
+  const u = { nome, usuario, senha, role, ativo };
   // v3.8.6 — id informado = usuário já tem lugar marcado (edição offline / upsert)
   const idFixo = idTemporarioLocal(idPreferido) ? null : Number(idPreferido);
   if (sql) {
@@ -1027,15 +1191,13 @@ async function insertUser(body, idPreferido = null) {
         VALUES (${idFixo}, ${u.nome}, ${u.usuario}, ${u.senha}, ${u.role}, ${u.ativo})
         ON CONFLICT (id) DO UPDATE SET nome = EXCLUDED.nome, usuario = EXCLUDED.usuario, senha = EXCLUDED.senha, role = EXCLUDED.role, ativo = EXCLUDED.ativo
         RETURNING id, nome, usuario, role, ativo`;
-      if (rows[0]) return rows[0];
-      const error = new Error('O usuário foi enviado, mas não foi devolvido pelo banco.');
-      error.statusCode = 500;
-      throw error;
+      if (rows[0]) return usuarioPublico(rows[0]);
+      throw erroApi('O usuário foi enviado, mas não foi devolvido pelo banco.', 500);
     }
     return await retryDuplicateKey(async () => {
       const nid = await nextRowId('users');
       const rows = await sql`INSERT INTO users (id, nome, usuario, senha, role, ativo) VALUES (${nid}, ${u.nome}, ${u.usuario}, ${u.senha}, ${u.role}, ${u.ativo}) RETURNING id, nome, usuario, role, ativo`;
-      return rows[0] || { id: nid, nome: u.nome, usuario: u.usuario, role: u.role, ativo: u.ativo };
+      return usuarioPublico(rows[0] || { id: nid, ...u });
     });
   }
   const arr = loadFile().users;
@@ -1044,14 +1206,12 @@ async function insertUser(body, idPreferido = null) {
     const novaSenha = u.senha ? u.senha : arr[idx].senha;
     arr[idx] = { ...arr[idx], nome: u.nome, usuario: u.usuario, senha: novaSenha, role: u.role, ativo: u.ativo, id: arr[idx].id };
     saveFile();
-    const { senha, ...pub } = arr[idx];
-    return pub;
+    return usuarioPublico(arr[idx]);
   }
   const novo = { id: idFixo || nextId(arr), ...u };
   arr.push(novo);
   saveFile();
-  const { senha, ...pub } = novo;
-  return pub;
+  return usuarioPublico(novo);
 }
 
 async function updateUser(id, body) {
@@ -1059,35 +1219,51 @@ async function updateUser(id, body) {
   const idNum = Number(id);
   const temporario = idTemporarioLocal(idNum);
   if (temporario) return insertUser(body, null);
+  const todos = await listUsers();
+  const atual = todos.find((x) => Number(x.id) === idNum);
+  // v3.8.6 — UPSERT: id que não está no banco é gravado com esse mesmo id
+  if (!atual) return insertUser(body, idNum);
+
+  const nome = String(body.nome === undefined ? atual.nome : body.nome || '').trim();
+  const usuario = String(body.usuario === undefined ? atual.usuario : body.usuario || '').trim();
+  if (!nome || !usuario) throw erroApi('Nome e usuário são obrigatórios.', 400);
+  if (usuario.toLowerCase() !== String(atual.usuario || '').trim().toLowerCase()) {
+    validarLoginUsuario(usuario);
+    if (await usuarioJaExiste(usuario, idNum)) throw erroApi(`Já existe uma conta com o usuário "${usuario}".`, 409);
+  }
+  // Perfil/atividade: só valida o que veio no corpo; o resto fica como está.
+  const role = body.role === undefined || body.role === null ? normalizeRole(atual.role) : roleDoBody(body.role);
+  const ativo = body.ativo === undefined || body.ativo === null ? ativoDoBody(atual.ativo) : ativoDoBody(body.ativo);
   // senha vazia/ausente = manter a que já está no banco; senão, gravar o hash.
-  const novaSenha = body.senha === undefined || String(body.senha).trim() === '' ? undefined : hashSenha(body.senha);
+  const trocouSenha = !(body.senha === undefined || String(body.senha).trim() === '');
+  if (trocouSenha) validarSenhaNova(body.senha);
+  const senha = trocouSenha ? hashSenha(body.senha) : atual.senha;
+  if (!senha) throw erroApi('Informe uma senha para esta conta.', 400);
+  // Trava anti-bloqueio: a última conta de Administrador ativa não pode ser
+  // rebaixada nem desativada (valores já resolvidos acima, portanto só vale
+  // quando a edição realmente muda o perfil ou a atividade da conta).
+  await impedirMexerNoUltimoAdmin(idNum, {
+    novoRole: role === normalizeRole(atual.role) ? null : role,
+    novoAtivo: ativo === ativoDoBody(atual.ativo) ? null : ativo
+  });
+
+  const m = { ...atual, nome, usuario, senha, role, ativo, id: idNum };
   if (sql) {
     await ensureNeon();
-    const cur = await sql`SELECT * FROM users WHERE id = ${idNum}`;
-    if (cur.length === 0) {
-      // v3.8.6 — UPSERT: id não está no banco, grava com esse mesmo id
-      return insertUser(body, idNum);
-    }
-    const m = { ...cur[0], ...body, id: idNum, senha: novaSenha === undefined ? cur[0].senha : novaSenha };
-    // Garante que nome/usuario não fiquem vazios no update parcial
-    if (!String(m.nome || '').trim() || !String(m.usuario || '').trim()) {
-      const e = new Error('Nome e usuário são obrigatórios.');
-      e.statusCode = 400;
-      throw e;
-    }
     await sql`UPDATE users SET nome = ${m.nome}, usuario = ${m.usuario}, senha = ${m.senha}, role = ${m.role}, ativo = ${m.ativo} WHERE id = ${idNum}`;
-    return { id: m.id, nome: m.nome, usuario: m.usuario, role: m.role, ativo: m.ativo };
+    return usuarioPublico(m);
   }
   const arr = loadFile().users;
   const idx = arr.findIndex((x) => Number(x.id) === idNum);
   if (idx === -1) return insertUser(body, idNum); // upsert arquivo
-  arr[idx] = { ...arr[idx], ...body, id: arr[idx].id, senha: novaSenha === undefined ? arr[idx].senha : novaSenha };
+  arr[idx] = m;
   saveFile();
-  const { senha, ...pub } = arr[idx];
-  return pub;
+  return usuarioPublico(m);
 }
 
 async function deleteUser(id) {
+  // v3.10.0 — não se apaga a última conta de Administrador ativa.
+  await impedirMexerNoUltimoAdmin(id, { excluir: true });
   if (sql) {
     await ensureNeon();
     const rows = await sql`DELETE FROM users WHERE id = ${id} RETURNING id`;
@@ -1113,10 +1289,71 @@ async function checkLogin(usuario, senhaPlain) {
     (x.senha === h || x.senha === p || (u.toLowerCase() === 'admin' && (p === 'admin' || p === 'admin2025') && (x.senha === LEGACY_ADMIN_HASH || x.senha === sha256('admin2025'))))
   );
   if (!found) return null;
-  return { id: found.id, nome: found.nome, usuario: found.usuario, role: found.role };
+  return usuarioPublico(found);
 }
 
-function stripSenha(u) { if (!u) return u; const { senha, ...pub } = u; return pub; }
+// v3.10.0 — representação pública de uma conta: NUNCA sai senha, o papel vem
+// normalizado para um dos DOIS perfis (`admin`/`operador`) e ganha o rótulo
+// legível (`perfil`) que a tela mostra.
+function usuarioPublico(u) {
+  if (!u) return u;
+  const role = normalizeRole(u.role);
+  return {
+    id: u.id,
+    nome: u.nome,
+    usuario: u.usuario,
+    role,
+    perfil: ROLE_LABELS[role],
+    ativo: u.ativo === undefined || u.ativo === null ? 1 : (Number(u.ativo) === 0 ? 0 : 1)
+  };
+}
+
+// Mantido por compatibilidade com os chamadores antigos: mesmo resultado de
+// usuarioPublico (tira a senha e normaliza o perfil).
+function stripSenha(u) { return usuarioPublico(u); }
+
+// ---------- Travas da área de usuários (v3.10.0) ----------
+
+// `usuario` é a credencial de login: duas contas com o mesmo nome confundem o
+// login (a primeira encontrada vence). Comparação sem diferenciar maiúsculas.
+async function usuarioJaExiste(usuario, ignorarId = null) {
+  const alvo = String(usuario || '').trim().toLowerCase();
+  if (!alvo) return false;
+  const users = await listUsers();
+  return users.some((u) => String(u.usuario || '').trim().toLowerCase() === alvo
+    && (ignorarId === null || Number(u.id) !== Number(ignorarId)));
+}
+
+function validarSenhaNova(senha) {
+  const t = String(senha == null ? '' : senha).trim();
+  // Um hash de 64 hex já vem pronto (fila offline / chamada direta): não se mede
+  // o comprimento da senha original, que o servidor nunca viu.
+  if (/^[0-9a-f]{64}$/i.test(t)) return;
+  if (t.length < SENHA_MIN) {
+    throw erroApi(`A senha precisa ter pelo menos ${SENHA_MIN} caracteres.`, 400);
+  }
+}
+
+// O sistema não pode ficar sem Administrador ativo: sem isso, um clique
+// descuidado trancaria todo mundo fora do menu Usuários para sempre.
+async function impedirMexerNoUltimoAdmin(idAlvo, { novoRole = null, novoAtivo = null, excluir = false } = {}) {
+  const users = await listUsers();
+  const alvo = users.find((u) => Number(u.id) === Number(idAlvo));
+  if (!alvo) return;
+  const ehAdminAtivo = isRoleAdmin(alvo.role) && Number(alvo.ativo) === 1;
+  const vaiPerderAdmin = excluir
+    || (novoRole !== null && !isRoleAdmin(novoRole))
+    || (novoAtivo !== null && Number(novoAtivo) !== 1);
+  if (!ehAdminAtivo || !vaiPerderAdmin) return;
+  const outros = users.filter((u) => Number(u.id) !== Number(alvo.id) && isRoleAdmin(u.role) && Number(u.ativo) === 1);
+  if (outros.length) return;
+  throw erroApi(
+    excluir
+      ? 'Esta é a última conta de Administrador ativa: crie outro administrador antes de excluí-la.'
+      : 'Esta é a última conta de Administrador ativa — não dá para rebaixá-la ou desativá-la. Crie outro administrador antes.',
+    400
+  );
+}
 
 // ============================================================
 // HTTP
@@ -1459,7 +1696,9 @@ async function handleRequest(req, res) {
   if (req.method === 'OPTIONS') {
     // v3.8.5 — o preflight libera o cabeçalho de override: é ele que permite
     // enviar POST onde a rede bloqueia PATCH/PUT/DELETE.
-    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-HTTP-Method-Override', 'Cache-Control': 'no-store' });
+    // v3.10.0 — e o Authorization: é ele que leva a sessão assinada do
+    // Administrador para a área de usuários.
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-HTTP-Method-Override, Authorization, X-Frota-Token', 'Cache-Control': 'no-store' });
     return res.end();
   }
   const host = req.headers.host || 'localhost';
@@ -1513,10 +1752,12 @@ async function handleRequest(req, res) {
       if (resource === 'status') {
         const vehicles = await listVehicles();
         const manutencoes = await listManutencoes();
-        return json(res, 200, { online: true, version: VERSION, db: sql ? 'neon' : 'file', intervalo_troca_oleo_km: OIL_INTERVAL_KM, counts: { vehicles: vehicles.length, manutencoes: manutencoes.length, trocas_oleo: manutencoes.filter((m) => m.tipo === 'TROCA DE ÓLEO').length } });
+        return json(res, 200, { online: true, version: VERSION, db: sql ? 'neon' : 'file', intervalo_troca_oleo_km: OIL_INTERVAL_KM, perfis: ROLE_LABELS, senha_minima: SENHA_MIN, counts: { vehicles: vehicles.length, manutencoes: manutencoes.length, trocas_oleo: manutencoes.filter((m) => m.tipo === 'TROCA DE ÓLEO').length } });
       }
+      // v3.10.0 — GET /api/data traz a lista de contas: virou área do Administrador.
       if (resource === 'data' && reqMethod === 'GET') {
-        return json(res, 200, { vehicles: await listVehicles(), users: (await listUsers()).map(stripSenha) });
+        await exigirAdmin(req);
+        return json(res, 200, { vehicles: await listVehicles(), users: (await listUsers()).map(usuarioPublico) });
       }
       if (resource === 'seed' && reqMethod === 'POST') {
         await seedVehicles();
@@ -1526,7 +1767,19 @@ async function handleRequest(req, res) {
         const body = await parseBody(req);
         const user = await checkLogin(body.usuario, body.senha);
         if (!user) return json(res, 401, { error: 'Usuário ou senha incorretos.' });
-        return json(res, 200, user);
+        const publico = usuarioPublico(user);
+        // v3.10.0 — o login entrega a sessão assinada (HMAC, validade de 12h).
+        // É ela que abre a área de usuários; sem ela o app continua operando a
+        // frota normalmente, só não gerencia contas.
+        return json(res, 200, { ...publico, token: gerarToken(publico), expira_em: Date.now() + TOKEN_TTL_MS });
+      }
+
+      // v3.10.0 — quem sou eu? Valida o token guardado pelo navegador e devolve
+      // a conta com o papel ATUAL (o front usa isso para renovar a sessão e para
+      // saber se o menu Usuários continua liberado).
+      if ((resource === 'session' || resource === 'me') && (reqMethod === 'GET' || reqMethod === 'POST')) {
+        const { usuario, sessao } = await exigirSessao(req);
+        return json(res, 200, { ...usuario, admin: isRoleAdmin(usuario.role), expira_em: sessao.exp });
       }
 
       if (resource === 'trocas-oleo' || resource === 'oil-changes') {
@@ -1611,12 +1864,18 @@ async function handleRequest(req, res) {
         return json(res, 405, { error: 'Method not allowed' });
       }
 
-      if (resource === 'users') {
-        if (reqMethod === 'GET' && !id) return json(res, 200, (await listUsers()).map(stripSenha));
+      // v3.10.0 — ÁREA RESTRITA DO ADMINISTRADOR: qualquer operação em contas
+      // (listar, criar, editar, excluir) exige sessão válida com perfil `admin`.
+      // Sem token → 401; token de Operador → 403. O papel é conferido no banco,
+      // então quem foi rebaixado perde o acesso imediatamente.
+      if (resource === 'users' || resource === 'usuarios') {
+        const { usuario: logado } = await exigirAdmin(req);
+        const ehEu = (alvo) => Number(alvo) === Number(logado.id);
+        if (reqMethod === 'GET' && !id) return json(res, 200, (await listUsers()).map(usuarioPublico));
         if (reqMethod === 'GET' && id) {
           const all = await listUsers();
           const it = all.find((x) => Number(x.id) === id);
-          return it ? json(res, 200, stripSenha(it)) : json(res, 404, { error: 'Not found' });
+          return it ? json(res, 200, usuarioPublico(it)) : json(res, 404, { error: 'Not found' });
         }
         // v3.8.6 — usuários à prova de rede: POST com id (path ou corpo) = atualização (upsert),
         // igual a vehicles/manutencoes. Permite POST + X-HTTP-Method-Override: PATCH/DELETE
@@ -1625,12 +1884,23 @@ async function handleRequest(req, res) {
           const corpo = await parseBody(req);
           const alvo = id || idDoCorpo(corpo);
           if (alvo) {
+            // O administrador não rebaixa nem desativa a si mesmo: é a forma mais
+            // fácil de perder o menu sem perceber (a última conta ativa também é
+            // protegida por impedirMexerNoUltimoAdmin, dentro de updateUser).
+            if (ehEu(alvo)) {
+              const novoRole = corpo.role === undefined || corpo.role === null ? null : roleDoBody(corpo.role);
+              const novoAtivo = corpo.ativo === undefined || corpo.ativo === null ? null : ativoDoBody(corpo.ativo);
+              if ((novoRole !== null && novoRole !== ROLE_ADMIN) || novoAtivo === 0) {
+                throw erroApi('Você não pode rebaixar nem desativar a sua própria conta.', 400);
+              }
+            }
             const upd = await updateUser(alvo, corpo);
             return upd ? json(res, 200, upd) : json(res, 201, await insertUser(corpo, alvo));
           }
           if (reqMethod === 'POST') return json(res, 201, await insertUser(corpo));
         }
         if (reqMethod === 'DELETE' && id) {
+          if (ehEu(id)) throw erroApi('Você não pode excluir a sua própria conta.', 400);
           return (await deleteUser(id)) ? json(res, 200, { success: true }) : json(res, 404, { error: 'Not found' });
         }
         return json(res, 405, { error: 'Method not allowed' });

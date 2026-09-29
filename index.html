@@ -72,6 +72,16 @@
           <span class="nav-icon" aria-hidden="true">◉</span> Troca de Óleo
           <span class="nav-badge" id="nav-oil-badge" hidden>0</span>
         </button>
+
+        <!-- v3.10.0 — bloco exclusivo do perfil ADMINISTRADOR.
+             O `hidden` é ligado/desligado por App.applyPermissions() conforme o
+             papel de quem entrou: o Operador nunca vê estes itens (e a página é
+             barrada também no servidor, em /api/users). -->
+        <span class="nav-section admin-only" id="nav-section-admin" hidden>Administração</span>
+        <button type="button" class="nav-item admin-only" data-page="users" id="nav-users" hidden
+                title="Criar e gerenciar contas (somente Administrador)">
+          <span class="nav-icon" aria-hidden="true">👥</span> Usuários
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -87,6 +97,7 @@
         <div class="topbar-user">
           <span class="user-avatar" aria-hidden="true">U</span>
           <span class="user-name-text" id="user-name">Usuário</span>
+          <span class="user-role-chip chip-operador" id="user-role" title="Perfil de acesso desta conta">Operador</span>
           <button type="button" class="btn btn-sm btn-logout" id="btn-logout">Sair</button>
         </div>
       </header>
@@ -240,6 +251,78 @@
           <div class="card oil-report-card">
             <div class="section-head"><div><span class="section-kicker">Acompanhamento</span><h3>Relatório mensal</h3></div></div>
             <div id="oil-report-output" class="oil-report-output"><span class="report-muted">Selecione um mês e clique em “Relatório mensal”.</span></div>
+          </div>
+        </section>
+
+        <!-- ===== Página: Usuários (v3.10.0 — só o perfil Administrador chega aqui) ===== -->
+        <section class="page-section" id="page-users">
+          <div class="section-head">
+            <div>
+              <span class="section-kicker">Administração</span>
+              <h3>Usuários do Sistema</h3>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="App.openUserModal()">＋ Novo usuário</button>
+          </div>
+
+          <!-- Aviso de sessão: gerenciar contas exige login válido do Administrador -->
+          <div class="card session-alert" id="users-session-alert" hidden>
+            <strong id="users-session-title">Sessão necessária</strong>
+            <p id="users-session-text">Para criar e editar usuários é preciso estar conectado com uma conta de Administrador.</p>
+            <div class="session-alert-actions">
+              <button type="button" class="btn btn-sm" onclick="App.syncUsers()">Tentar novamente</button>
+              <button type="button" class="btn btn-sm btn-primary" onclick="App.renewSession()">Sair e entrar novamente</button>
+            </div>
+          </div>
+
+          <div class="card perfis-card">
+            <div class="section-head"><div><span class="section-kicker">Perfis de acesso</span><h3>Dois perfis disponíveis</h3></div></div>
+            <div class="perfis-grid">
+              <div class="perfil-resumo perfil-admin">
+                <span class="perfil-icone" aria-hidden="true">🛡️</span>
+                <div>
+                  <strong>Administrador</strong>
+                  <p>Acesso total à frota <b>e</b> ao menu Usuários: cria, edita, exclui contas e define o perfil de cada uma.</p>
+                </div>
+              </div>
+              <div class="perfil-resumo perfil-operador">
+                <span class="perfil-icone" aria-hidden="true">👤</span>
+                <div>
+                  <strong>Operador</strong>
+                  <p>Usa Painel Geral, Veículos, Manutenção e Troca de Óleo. <b>Não vê</b> o menu Usuários e a API nega acesso às contas.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="oil-summary-grid users-summary-grid">
+            <div class="card oil-summary-card"><span class="summary-label">Contas</span><strong id="user-summary-total">0</strong><small>usuários cadastrados</small></div>
+            <div class="card oil-summary-card"><span class="summary-label">Administradores</span><strong id="user-summary-admins">0</strong><small>veem o menu Usuários</small></div>
+            <div class="card oil-summary-card"><span class="summary-label">Operadores</span><strong id="user-summary-operadores">0</strong><small>perfil de operação da frota</small></div>
+            <div class="card oil-summary-card"><span class="summary-label">Inativos</span><strong id="user-summary-inativos">0</strong><small>não conseguem entrar</small></div>
+          </div>
+
+          <div class="vehicles-toolbar card oil-toolbar">
+            <input type="search" id="user-search" placeholder="Buscar por nome ou usuário…" aria-label="Buscar usuário">
+            <label class="oil-month-field"><span>Perfil</span>
+              <select id="user-perfil-filter" aria-label="Filtrar usuários por perfil">
+                <option value="">Todos os perfis</option>
+                <option value="admin">Administrador</option>
+                <option value="operador">Operador</option>
+              </select>
+            </label>
+            <label class="oil-month-field"><span>Situação</span>
+              <select id="user-ativo-filter" aria-label="Filtrar usuários por situação">
+                <option value="">Ativos e inativos</option>
+                <option value="1">Somente ativos</option>
+                <option value="0">Somente inativos</option>
+              </select>
+            </label>
+            <span class="vehicle-count" id="user-count">0 usuário(s)</span>
+          </div>
+
+          <div class="card oil-table-card">
+            <div class="section-head oil-list-head"><div><span class="section-kicker">Contas</span><h3>Quem acessa o sistema</h3></div></div>
+            <div class="table-responsive" id="users-list"></div>
           </div>
         </section>
       </main>
@@ -403,6 +486,75 @@
         <div class="modal-actions">
           <button type="button" class="btn" onclick="App.closeModal('vehicle-modal')">Cancelar</button>
           <button type="submit" class="btn btn-primary">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: Usuário (v3.10.0 — exclusivo do Administrador) ================= -->
+  <div class="modal" id="user-modal">
+    <div class="modal-backdrop" onclick="App.closeModal('user-modal')"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+      <div class="modal-header">
+        <h3 id="user-modal-title">Novo Usuário</h3>
+        <button type="button" class="btn btn-icon" title="Fechar" aria-label="Fechar" onclick="App.closeModal('user-modal')">✕</button>
+      </div>
+      <form id="user-form" onsubmit="event.preventDefault(); App.saveUser();">
+        <div class="form-grid">
+          <label class="form-field">
+            <span>Nome completo *</span>
+            <input type="text" id="u-nome" name="nome" maxlength="80" placeholder="Nome de quem vai usar" autocomplete="off" required>
+          </label>
+          <label class="form-field">
+            <span>Usuário (login) *</span>
+            <input type="text" id="u-usuario" name="usuario" maxlength="30" placeholder="ex.: joao.silva" autocomplete="off" required>
+          </label>
+          <label class="form-field">
+            <span id="u-senha-label">Senha *</span>
+            <div class="password-wrap">
+              <input type="password" id="u-senha" name="senha" minlength="6" placeholder="Mínimo de 6 caracteres" autocomplete="new-password">
+              <button type="button" id="toggle-user-password" aria-label="Mostrar senha">Mostrar</button>
+            </div>
+          </label>
+          <label class="form-field">
+            <span>Confirmar senha</span>
+            <input type="password" id="u-senha2" name="senha2" minlength="6" placeholder="Repita a senha" autocomplete="new-password">
+          </label>
+          <label class="form-field">
+            <span>Situação</span>
+            <select id="u-ativo" name="ativo">
+              <option value="1">Ativo — pode entrar no sistema</option>
+              <option value="0">Inativo — acesso bloqueado</option>
+            </select>
+          </label>
+
+          <!-- Os DOIS perfis do sistema, em cartões: o administrador escolhe um -->
+          <fieldset class="form-field form-field-wide perfil-picker">
+            <legend>Perfil de acesso *</legend>
+            <div class="perfil-cards">
+              <label class="perfil-card" data-perfil="operador">
+                <input type="radio" name="u-perfil" value="operador" checked>
+                <span class="perfil-icone" aria-hidden="true">👤</span>
+                <span class="perfil-texto">
+                  <strong>Operador</strong>
+                  <small>Painel, veículos, manutenção e troca de óleo. Não vê o menu Usuários.</small>
+                </span>
+              </label>
+              <label class="perfil-card" data-perfil="admin">
+                <input type="radio" name="u-perfil" value="admin">
+                <span class="perfil-icone" aria-hidden="true">🛡️</span>
+                <span class="perfil-texto">
+                  <strong>Administrador</strong>
+                  <small>Tudo o que o Operador faz mais a gestão de contas (este menu).</small>
+                </span>
+              </label>
+            </div>
+            <p class="perfil-aviso" id="u-perfil-aviso"></p>
+          </fieldset>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn" onclick="App.closeModal('user-modal')">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="u-salvar">Salvar usuário</button>
         </div>
       </form>
     </div>
