@@ -7,7 +7,7 @@ Online (Vercel + Neon) para acesso de vários computadores ao mesmo tempo.
 
 ```
 Frota/
-├── index.html          → interface (login, dashboard, cadastro de veículos)
+├── index.html          → interface (login, dashboard, veículos, manutenção e usuários)
 ├── server.js           → servidor Node nativo (API REST + arquivos estáticos)
 ├── package.json        → scripts e dependência (@neondatabase/serverless)
 ├── vercel.json         → configuração de deploy na Vercel
@@ -16,7 +16,7 @@ Frota/
 │   └── style.css       → estilos da interface
 ├── js/
 │   ├── config.js       → configurações do front-end
-│   └── app.js          → lógica do front-end (login, dashboard, CRUD via API)
+│   └── app.js          → lógica do front-end (login, perfis de acesso, CRUD via API)
 ├── api/
 │   ├── index.js        → ponto de entrada principal /api na Vercel (usa server.js)
 │   └── [...path].js    → função serverless /api/* na Vercel (usa server.js)
@@ -110,6 +110,74 @@ O histórico mostra:
 O restante do cartão continua abrindo a **edição do veículo**; a placa é que abre o histórico.
 `Esc` fecha o modal.
 
+## 👥 Usuários e perfis de acesso (v3.10.0)
+
+O menu **Usuários** permite criar, editar, excluir e bloquear contas — e aparece
+**somente para o perfil Administrador**. Existem **dois perfis**, e só dois:
+
+| Perfil | Valor no banco | O que faz | Vê o menu Usuários? |
+|---|---|---|---|
+| **Administrador** | `admin` | Painel Geral, Veículos, Manutenção, Troca de Óleo **e** a gestão de contas (criar, editar, excluir, ativar/desativar e definir o perfil de cada usuário) | ✅ Sim |
+| **Operador** | `operador` | Painel Geral, Veículos, Manutenção e Troca de Óleo | ❌ Não |
+
+Contas antigas gravadas com outro papel (`user`, vazio) são lidas como
+**Operador** — o padrão é sempre o perfil **sem** privilégio de gerenciar contas.
+
+### Como criar um usuário
+
+1. Entre com uma conta de **Administrador** (o menu **Administração → Usuários**
+   aparece na barra lateral).
+2. Clique em **＋ Novo usuário**.
+3. Preencha **Nome completo**, **Usuário (login)** — 3 a 30 caracteres, sem
+   espaços — e **Senha** (mínimo de 6 caracteres, com confirmação).
+4. Escolha o **perfil de acesso** nos cartões: **Operador** (padrão) ou
+   **Administrador**. O cartão explica na hora o que cada perfil pode fazer.
+5. Em **Situação**, mantenha *Ativo* (ou crie a conta já *Inativa*, sem acesso).
+6. **Salvar usuário**. A conta passa a valer imediatamente, em qualquer computador.
+
+Na edição, o campo de senha vira **“Nova senha (opcional)”**: em branco, a senha
+atual é mantida. Cada linha da tabela mostra nome, login, perfil, situação e os
+botões de editar/excluir; a conta em uso aparece marcada como **você** e não pode
+ser excluída.
+
+### Proteção em duas camadas
+
+- **Na tela**: o item de menu, a página e os botões só existem para
+  Administrador (`App.applyPermissions()` liga/desliga tudo com a classe
+  `admin-only`). Um Operador que force a página pela URL volta ao Painel Geral
+  com um aviso.
+- **Na API** (a barreira real): o `POST /api/login` devolve uma **sessão
+  assinada** (HMAC-SHA256, `payload.assinatura`, validade de **12 h**) que o
+  navegador envia em `Authorization: Bearer`. Todas as rotas de contas exigem
+  essa sessão com perfil `admin`: **401** sem login/sessão expirada e **403**
+  para Operador. O papel é conferido **no banco a cada chamada**, então rebaixar
+  ou desativar um administrador corta o acesso na hora — o token antigo não
+  continua abrindo a área restrita.
+
+Travas anti-bloqueio (válidas na tela **e** na API):
+
+- a **última conta de Administrador ativa** não pode ser excluída, rebaixada nem
+  desativada (crie outro administrador antes);
+- ninguém **exclui, rebaixa ou desativa a própria conta**;
+- `usuario` é **único** (sem diferenciar maiúsculas) — duplicado responde **409**;
+- senha nova com menos de 6 caracteres responde **400**;
+- senhas continuam gravadas como **SHA-256** e nunca são devolvidas pela API.
+
+> 🔑 Defina **`AUTH_SECRET`** nas variáveis de ambiente da Vercel (qualquer texto
+> longo e aleatório) para assinar as sessões com um segredo próprio. Sem ele, o
+> segredo é derivado da `DATABASE_URL` — funciona, mas trocar o banco invalida as
+> sessões abertas. A validade é ajustável por `AUTH_TOKEN_TTL_HOURS` (padrão 12).
+
+> ⚠️ **Gerenciar usuários exige conexão com a API.** Diferente de veículos e
+> manutenções, contas **não entram na fila offline**: a senha precisa ser
+> gravada (hasheada) no servidor. Sem conexão, a página mostra o último cache do
+> dispositivo e um aviso — nada é salvo até a API responder.
+
+> 🔁 **Quem já estava logado** quando esta versão entrou: a sessão antiga não é
+> assinada, então a frota continua funcionando normalmente, mas a página
+> Usuários pede **“Sair e entrar novamente”** uma única vez para liberar a
+> gestão de contas.
+
 ## 🚀 Executar localmente
 
 ```bash
@@ -117,7 +185,8 @@ npm install
 npm start
 ```
 
-Acesse `http://localhost:8080` — login: **admin / admin2025**
+Acesse `http://localhost:8080` — login: **admin / admin2025** (perfil
+**Administrador**: é ele que vê o menu **Usuários** e cria as demais contas).
 
 ## ☁️ Deploy (Vercel + Neon)
 
@@ -126,6 +195,9 @@ Acesse `http://localhost:8080` — login: **admin / admin2025**
 2. **Vercel**: importe o repositório `Infraestrutura2026/Frota`.
 3. Em **Settings → Environment Variables**, adicione:
    - `DATABASE_URL` = *connection string do Neon*
+   - `AUTH_SECRET` = texto longo e aleatório que assina as sessões de login
+     (opcional, mas recomendado — sem ele o segredo é derivado da `DATABASE_URL`;
+     `AUTH_TOKEN_TTL_HOURS` ajusta a validade da sessão, padrão **12** horas)
 4. Deploy. Pronto — o sistema fica online e os dados são compartilhados.
 
 ### Roteamento: API primeiro
@@ -172,8 +244,9 @@ no banco.
 |--------------|---------------------|--------------------------------|
 | GET          | `/api/status`       | Status + banco em uso (neon/file) |
 | GET          | `/api/echo`         | **Espelho da rede**: devolve o que a função recebeu (path, método, host, query, corpo e cabeçalhos de proxy). `?completo=1` inclui o dump de **todos** os cabeçalhos — sempre sem credenciais |
-| GET          | `/api/data`         | Veículos + usuários (sem senha)|
-| POST         | `/api/login`        | Login `{usuario, senha}`       |
+| GET          | `/api/data`         | Veículos + usuários (sem senha) — 🔒 **exige Administrador** |
+| POST         | `/api/login`        | Login `{usuario, senha}` → devolve a conta, o `perfil` e o `token` de sessão assinado (v3.10.0) |
+| GET          | `/api/session`      | 🔒 Valida o token enviado e devolve quem está logado (`{id, nome, usuario, role, perfil, ativo, admin}`) |
 | POST         | `/api/seed`         | Recria os 29 veículos iniciais |
 | GET          | `/api/vehicles`     | Lista veículos                 |
 | GET          | `/api/vehicles/:id` | Busca um veículo               |
@@ -181,7 +254,12 @@ no banco.
 | PATCH/PUT    | `/api/vehicles/:id` | Atualiza um veículo (upsert: id inexistente é gravado) |
 | POST         | `/api/vehicles/:id` | Atualiza um veículo (equivale a PATCH/PUT; aceita `X-HTTP-Method-Override` / `?_method=`) |
 | DELETE       | `/api/vehicles/:id` | Exclui um veículo              |
-| idem         | `/api/users`        | Mesmas operações p/ usuários   |
+| GET          | `/api/users`        | 🔒 Lista as contas (sem senha), com `role` normalizado e o rótulo `perfil` — **exige Administrador** |
+| POST         | `/api/users`        | 🔒 Cria uma conta `{nome, usuario, senha, role, ativo}` (`role`: `admin` ou `operador`) |
+| PATCH/PUT    | `/api/users/:id`    | 🔒 Edita uma conta (senha em branco mantém a atual; upsert: id inexistente é gravado) |
+| POST         | `/api/users/:id`    | 🔒 Edita uma conta (equivale a PATCH/PUT; aceita `X-HTTP-Method-Override` / `?_method=`) |
+| DELETE       | `/api/users/:id`    | 🔒 Exclui uma conta |
+| idem         | `/api/usuarios`     | Alias em português das rotas de usuários |
 | GET          | `/api/manutencoes`  | Lista manutenções (filtros: `tipo`, `status_os`, `mes`, `ano`, `q`, `placa`, `vehicle_id`) |
 | POST         | `/api/manutencoes`  | Registra uma manutenção / ordem de serviço (com `id` no corpo, atualiza) |
 | PATCH/PUT    | `/api/manutencoes/:id` | Edita um registro (upsert: id inexistente é gravado) |
@@ -209,6 +287,18 @@ no banco.
 > exibido como `BRZ7720`. Placas Mercosul já cadastradas permanecem inalteradas.
 >
 > 🔒 Senhas ficam hasheadas (SHA-256) e nunca são retornadas pela API.
+>
+> 👥 **Área de usuários restrita ao Administrador (v3.10.0)**: tudo o que é
+> marcado com 🔒 (`/api/users*`, `/api/usuarios*`, `/api/data`) exige o header
+> `Authorization: Bearer <token>` de uma sessão válida **com perfil `admin`** —
+> sem token, **401**; token de Operador, **403**; conta desativada/excluída,
+> **401** mesmo com token no prazo. As demais rotas (veículos, manutenções,
+> trocas de óleo, relatórios, `status`, `echo`) continuam públicas, como antes.
+> Regras de segurança: a última conta de Administrador ativa não pode ser
+> excluída, rebaixada ou desativada; ninguém mexe na própria conta para se
+> excluir/rebaixar; `usuario` é único (**409** se repetido); senha mínima de
+> **6** caracteres (**400** se menor); `role` fora do par `admin`/`operador` é
+> recusado (**400**). Ver a seção “Usuários e perfis de acesso”.
 > 🔎 **Diagnóstico de erros**: respostas 500 da API trazem a causa vinda do Postgres
 > (`{"error":"Erro no servidor: column \"itens\" of relation \"manutencoes\" does not exist","sqlstate":"42703"}`)
 > e o mesmo texto sai no log da função na Vercel (`[API] POST /api/manutencoes → ...`), em vez

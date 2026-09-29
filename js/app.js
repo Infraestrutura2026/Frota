@@ -10,6 +10,10 @@ const App = (function() {
   let historyMonth = '';        // filtro de mês (YYYY-MM) escolhido no gráfico
   let historySyncing = false;
   let online = false;
+  // v3.10.0 — módulo de usuários (área exclusiva do perfil Administrador)
+  let users = [];
+  let editingUser = null;
+  let usersBlock = null; // por que a lista de contas não veio (sessão expirada / offline)
 
   // Seed offline (usado só se a API estiver indisponível e não houver cache)
   const VEHICLES = [
@@ -47,6 +51,37 @@ const App = (function() {
   const GROUPS = { S2:{label:'Grupo S2',icon:'🚐',cls:'group-s2'}, S3:{label:'Grupo S3',icon:'🚚',cls:'group-s3'}, S4:{label:'Grupo S4',icon:'🚛',cls:'group-s4'} };
   const MAN_TIPOS = ['PREVENTIVA', 'CORRETIVA', 'EMERGENCIAL', 'REVISÃO', 'RECALL', 'TROCA DE ÓLEO'];
   const MAN_STATUS = ['EM ANDAMENTO', 'CONCLUÍDA', 'AGUARDANDO PEÇA', 'CANCELADA'];
+
+  // ============ PERFIS DE ACESSO (v3.10.0) ============
+  // Existem DOIS perfis, e só dois:
+  //  • admin    → ADMINISTRADOR: tudo o que o Operador faz + o menu "Usuários"
+  //               (criar, editar, excluir contas e definir o perfil de cada uma);
+  //  • operador → OPERADOR: Painel Geral, Veículos, Manutenção e Troca de Óleo.
+  //               Não vê o menu Usuários — e a API também nega (/api/users).
+  // Qualquer valor antigo/estranho ("user", vazio, nulo) é lido como `operador`:
+  // o padrão é sempre o perfil SEM privilégio de gerenciar contas.
+  const PERFIS = {
+    admin:    { valor:'admin',    label:'Administrador', icone:'🛡️', badge:'perfil-admin',
+                descricao:'Além da frota, esta conta vê o menu Usuários e pode criar, editar e excluir contas.' },
+    operador: { valor:'operador', label:'Operador',      icone:'👤', badge:'perfil-operador',
+                descricao:'Usa Painel Geral, Veículos, Manutenção e Troca de Óleo. O menu Usuários não aparece para esta conta.' }
+  };
+  const SENHA_MIN = 6;
+  const USERS_CACHE_KEY = 'frota_users_publicos';
+  const USERS_BLOCKED_MSG = 'Somente o perfil Administrador pode gerenciar usuários.';
+  function normalizeRole(r){ const t=String(r==null?'':r).trim().toLowerCase(); return (t==='admin'||t==='administrador')?'admin':'operador'; }
+  function isAdmin(){ return normalizeRole(currentUser&&currentUser.role)==='admin'; }
+  function perfilDe(r){ return PERFIS[normalizeRole(r)]||PERFIS.operador; }
+  // Sessão assinada pelo servidor (payload.assinatura). Tokens de versões
+  // anteriores ("token_1_1234...") não abrem a área de usuários — o aviso pede
+  // um novo login em vez de deixar o administrador sem entender o que houve.
+  function ehTokenAssinado(t){ const s=String(t||''); return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(s) && s.length<=600; }
+  function iniciaisDe(nome){
+    const partes=String(nome||'').trim().split(/\s+/).filter(Boolean);
+    if(!partes.length)return 'U';
+    if(partes.length===1)return partes[0].slice(0,2).toUpperCase();
+    return (partes[0].charAt(0)+partes[partes.length-1].charAt(0)).toUpperCase();
+  }
   function norm(g){ return String(g||'').trim().toUpperCase()||'SEM GRUPO'; }
   function keys(){ const k=['S2','S3','S4']; vehicles.forEach(v=>{ const g=norm(v.grupo); if(!k.includes(g))k.push(g); }); return k; }
   function info(g){ const k=norm(g); return GROUPS[k]||{label:`Grupo ${k}`,icon:'🚗',cls:'group-other'}; }
@@ -513,6 +548,9 @@ const App = (function() {
     const alt=altManutencaoPath(path); // v3.8.3 — null fora da família /manutencoes
     // Cabeçalhos: preserva os que vieram do chamador e acrescenta o override.
     const headers={...((opts&&opts.headers)||{})};
+    // v3.10.0 — a sessão assinada do login vai em todas as chamadas. É ela que
+    // abre a área de usuários no servidor (as demais rotas simplesmente a ignoram).
+    if(token && !headers['Authorization'] && !headers['authorization']) headers['Authorization']='Bearer '+token;
     if(!viaPost && METODOS_COM_OVERRIDE.includes(method) && !headers['X-HTTP-Method-Override']) headers['X-HTTP-Method-Override']=method;
     const fetchOpts={...(opts||{}),headers};
     let finalPath=path;
@@ -725,8 +763,9 @@ const App = (function() {
     bind();
     const st=localStorage.getItem('frota_token'), su=localStorage.getItem('frota_current_user');
     if(st&&su){try{currentUser=JSON.parse(su);token=st;}catch{}}
+    if(currentUser) currentUser.role=normalizeRole(currentUser.role); // perfis da v3.10.0
     if(!token||!currentUser){ showLogin(); }
-    else { showApp(); }
+    else { showApp(); } // já aplica as permissões do perfil (e puxa os usuários)
     await syncVehicles();
     await syncMaintenances();
     if(currentUser){ renderDashboard(); }
@@ -769,6 +808,21 @@ const App = (function() {
     const ms=document.getElementById('maint-search'); if(ms)ms.addEventListener('input',renderMaintenance);
     const mt=document.getElementById('maint-tipo-filter'); if(mt)mt.addEventListener('change',renderMaintenance);
     const mst=document.getElementById('maint-status-filter'); if(mst)mst.addEventListener('change',renderMaintenance);
+    // v3.10.0 — página Usuários (só o Administrador chega nela)
+    const us=document.getElementById('user-search'); if(us)us.addEventListener('input',renderUsers);
+    const upf=document.getElementById('user-perfil-filter'); if(upf)upf.addEventListener('change',renderUsers);
+    const uaf=document.getElementById('user-ativo-filter'); if(uaf)uaf.addEventListener('change',renderUsers);
+    const tup=document.getElementById('toggle-user-password');
+    if(tup) tup.addEventListener('click',()=>{
+      const campo=document.getElementById('u-senha');
+      const visivel=campo.type==='text';
+      campo.type=visivel?'password':'text';
+      tup.textContent=visivel?'Mostrar':'Ocultar';
+      tup.setAttribute('aria-label',visivel?'Mostrar senha':'Ocultar senha');
+    });
+    document.querySelectorAll('#user-form .perfil-card input[type="radio"]').forEach(radio=>{
+      radio.addEventListener('change',()=>marcarPerfil(radio.value));
+    });
     const mto=document.getElementById('m-tipo'); if(mto)mto.addEventListener('change',toggleOilFields);
     // v3.9.0 — troca de óleo: a próxima troca é calculada enquanto o hodômetro é digitado
     const mkm=document.getElementById('m-hodometro'); if(mkm)mkm.addEventListener('input',syncOilNext);
@@ -796,8 +850,11 @@ const App = (function() {
     // 1) Tenta login na API (válido em qualquer computador)
     try{
       const user=await api('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:u,senha:p})});
-      token='token_'+user.id+'_'+Date.now();
-      currentUser={id:user.id,nome:user.nome,usuario:user.usuario,role:user.role};
+      // v3.10.0 — a API devolve a sessão assinada (HMAC, 12h): é ela que abre a
+      // área de usuários. Sem token assinado (servidor antigo) o app continua
+      // operando a frota, só o menu Usuários pede um novo login.
+      token=user.token||('token_'+user.id+'_'+Date.now());
+      currentUser={id:user.id,nome:user.nome,usuario:user.usuario,role:normalizeRole(user.role)};
       localStorage.setItem('frota_token',token);
       localStorage.setItem('frota_current_user',JSON.stringify(currentUser));
       showApp(); await syncVehicles(); await syncMaintenances(); renderDashboard();
@@ -818,7 +875,7 @@ const App = (function() {
       const found=users.find(x=>x.usuario.toLowerCase()===u.toLowerCase()&&(x.senha===h||(u==='admin'&&(p==='admin'||p==='admin2025')))&&x.ativo===1);
       if(found){
         token='token_offline_'+found.id+'_'+Date.now();
-        currentUser={id:found.id,nome:found.nome,usuario:found.usuario,role:found.role};
+        currentUser={id:found.id,nome:found.nome,usuario:found.usuario,role:normalizeRole(found.role)};
         localStorage.setItem('frota_token',token);
         localStorage.setItem('frota_current_user',JSON.stringify(currentUser));
         showApp(); await syncVehicles(); await syncMaintenances(); renderDashboard();
@@ -831,27 +888,37 @@ const App = (function() {
 
   function logout(){
     token=null;currentUser=null;
+    users=[];editingUser=null;usersBlock=null; // v3.10.0 — nada de contas na tela de login
     localStorage.removeItem('frota_token');localStorage.removeItem('frota_current_user');
+    applyPermissions();
     showLogin();
   }
   function showLogin(){document.getElementById('login-screen').style.display='grid';document.getElementById('app-screen').style.display='none';}
   function showApp(){
     document.getElementById('login-screen').style.display='none';
     document.getElementById('app-screen').style.display='flex';
-    document.getElementById('user-name').textContent=currentUser?.nome||'Admin';
+    // v3.10.0 — nome, avatar e chip do perfil; e o menu Usuários só para admin
+    applyPermissions();
+    if(isAdmin()) syncUsers();
   }
 
   function page(p){
+    // v3.10.0 — a página de usuários é do Administrador. Quem é Operador e
+    // chegar aqui (atalho, URL digitada, navegador com o menu em cache) volta ao
+    // Painel Geral: esconder o item do menu é conveniência, a barreira real é a
+    // API (/api/users responde 403 para quem não é admin).
+    if(p==='users'&&!isAdmin()){ toast(USERS_BLOCKED_MSG,'aviso'); p='dashboard'; }
     document.querySelectorAll('.page-section').forEach(s=>s.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
     const t=document.getElementById('page-'+p); if(t)t.classList.add('active');
     const nv=document.querySelector(`.nav-item[data-page="${p}"]`); if(nv)nv.classList.add('active');
-    const titles={dashboard:'Painel Geral',vehicles:'Cadastro de Veículos',manutencao:'Manutenção','oil-changes':'Troca de Óleo'};
+    const titles={dashboard:'Painel Geral',vehicles:'Cadastro de Veículos',manutencao:'Manutenção','oil-changes':'Troca de Óleo',users:'Usuários'};
     document.getElementById('page-title').textContent=titles[p]||'Gestão de Frota';
     if(p==='dashboard')renderDashboard();
     if(p==='vehicles')renderVehicles();
     if(p==='manutencao')renderMaintenance();
     if(p==='oil-changes')renderOilChanges();
+    if(p==='users'){ renderUsers(); syncUsers(); }
   }
 
   function badge(s){s=(s||'').toUpperCase();if(s==='ATIVO')return'success';if(s==='MANUTENÇÃO')return'danger';if(s==='ARROLAMENTO')return'warning';return'default';}
@@ -1706,7 +1773,308 @@ const App = (function() {
     scheduleHeartbeat(2000);
   }
 
+  // ============ USUÁRIOS (v3.10.0) — área exclusiva do Administrador ============
+  //
+  // Criação de contas com DOIS perfis (Administrador e Operador). A proteção tem
+  // duas camadas: aqui o item de menu, a página e os botões só aparecem para quem
+  // tem perfil `admin`; no servidor (server.js) as rotas /api/users exigem a
+  // sessão assinada de um Administrador — 401 sem login, 403 para Operador.
+  // Diferente de veículos e manutenções, contas NÃO entram em fila offline: a
+  // senha precisa ser gravada (hasheada) no servidor, então sem conexão a página
+  // avisa e não deixa salvar.
+
+  function saveUsersCache(){ try{ localStorage.setItem(USERS_CACHE_KEY,JSON.stringify(users||[])); }catch{} }
+  function loadUsersCache(){ try{ const arr=JSON.parse(localStorage.getItem(USERS_CACHE_KEY)||'[]'); return Array.isArray(arr)?arr:[]; }catch{ return []; } }
+
+  // Cartão de aviso da página (sessão expirada / sem conexão / erro da API)
+  function setUsersBlock(titulo,texto,tipo){
+    usersBlock=titulo?{titulo,texto,tipo:tipo||''}:null;
+    const box=document.getElementById('users-session-alert'); if(!box)return;
+    if(!usersBlock){ box.hidden=true; return; }
+    box.className='card session-alert'+(usersBlock.tipo==='erro'?' erro':'');
+    const t=document.getElementById('users-session-title'); if(t)t.textContent=usersBlock.titulo;
+    const x=document.getElementById('users-session-text'); if(x)x.textContent=usersBlock.texto;
+    box.hidden=false;
+  }
+
+  async function syncUsers(){
+    if(!isAdmin()){ users=[]; editingUser=null; setUsersBlock(null); return; }
+    try{
+      const lista=await api('/users');
+      users=dedupeById(Array.isArray(lista)?lista:[]);
+      saveUsersCache();
+      setUsersBlock(null);
+    }catch(e){
+      users=loadUsersCache();
+      if(e&&(e.status===401||e.status===403)){
+        const semPerfil=e.status===403;
+        setUsersBlock(
+          semPerfil?'Perfil sem acesso':'Sessão expirada',
+          semPerfil
+            ? USERS_BLOCKED_MSG+' Esta conta está logada como '+perfilDe(currentUser&&currentUser.role).label+'.'
+            : (ehTokenAssinado(token)
+                ? (e.message||'Sessão expirada ou inválida.')+' Entre novamente com uma conta de Administrador para gerenciar usuários.'
+                : 'Esta sessão foi aberta antes do controle de perfis (v3.10.0). Saia e entre novamente para liberar a criação de usuários — o resto do sistema continua funcionando.'),
+          semPerfil?'erro':''
+        );
+      }else if(isOfflineError(e)){
+        online=false; setConnStatus(false);
+        setUsersBlock('Sem conexão com o servidor','Gerenciar usuários exige a API. Abaixo está o último cache deste dispositivo — nada pode ser criado ou alterado enquanto a conexão não voltar.');
+      }else{
+        setUsersBlock('Não foi possível carregar os usuários',e.message||'Erro inesperado ao falar com a API.','erro');
+      }
+    }
+    renderUsers();
+  }
+
+  function renderUsers(){
+    if(!isAdmin())return;
+    const lista=dedupeById(users);
+    const admins=lista.filter(u=>normalizeRole(u.role)==='admin');
+    const ativos=lista.filter(u=>Number(u.ativo)!==0);
+    const total=document.getElementById('user-summary-total'); if(total)total.textContent=lista.length;
+    const totalAdm=document.getElementById('user-summary-admins'); if(totalAdm)totalAdm.textContent=admins.length;
+    const totalOp=document.getElementById('user-summary-operadores'); if(totalOp)totalOp.textContent=lista.length-admins.length;
+    const totalIn=document.getElementById('user-summary-inativos'); if(totalIn)totalIn.textContent=lista.length-ativos.length;
+
+    const busca=(document.getElementById('user-search')?.value||'').trim().toLowerCase();
+    const filtroPerfil=(document.getElementById('user-perfil-filter')?.value||'').toLowerCase();
+    const filtroAtivo=document.getElementById('user-ativo-filter')?.value;
+    const filtrados=lista.filter(u=>{
+      const texto=`${u.nome||''} ${u.usuario||''}`.toLowerCase();
+      const ehAtivo=Number(u.ativo)!==0;
+      const ativoOk=filtroAtivo===''||filtroAtivo===undefined?true:ehAtivo===(filtroAtivo==='1');
+      return (!busca||texto.includes(busca))&&(!filtroPerfil||normalizeRole(u.role)===filtroPerfil)&&ativoOk;
+    })
+    // Administradores primeiro, depois em ordem alfabética
+    .sort((a,b)=>(normalizeRole(b.role)==='admin')-(normalizeRole(a.role)==='admin')
+      ||String(a.nome||a.usuario||'').localeCompare(String(b.nome||b.usuario||''),'pt-BR'));
+
+    const countEl=document.getElementById('user-count'); if(countEl)countEl.textContent=`${filtrados.length} usuário(s)`;
+    const list=document.getElementById('users-list'); if(!list)return;
+    const rows=filtrados.map(u=>{
+      const perfil=perfilDe(u.role);
+      const ehEu=Number(u.id)===Number(currentUser?.id);
+      const ativo=Number(u.ativo)!==0;
+      const nome=`${esc(u.nome||'-')}${ehEu?'<span class="user-tag-voce" title="Esta é a conta em uso">você</span>':''}`;
+      const acoes=`<button class="btn btn-sm btn-primary" title="Editar usuário" onclick="App.editUser(${Number(u.id)})">✏️</button>`
+        +(ehEu
+          ? '<button class="btn btn-sm" disabled title="Você não pode excluir a sua própria conta">🗑️</button>'
+          : `<button class="btn btn-sm btn-danger" title="Excluir usuário" onclick="App.deleteUser(${Number(u.id)})">🗑️</button>`);
+      return `<tr><td><div class="user-cell"><span class="user-cell-avatar${perfil.valor==='admin'?' admin':''}" aria-hidden="true">${esc(iniciaisDe(u.nome||u.usuario))}</span><div><strong>${nome}</strong><small class="table-subtitle">@${esc(u.usuario||'-')}</small></div></div></td>`
+        +`<td><span class="badge ${perfil.badge}">${perfil.icone} ${esc(perfil.label)}</span></td>`
+        +`<td><span class="badge ${ativo?'success':'default'}">${ativo?'ATIVO':'INATIVO'}</span></td>`
+        +`<td>${acoes}</td></tr>`;
+    }).join('');
+    list.innerHTML=`<table class="data-table"><thead><tr><th>Usuário</th><th>Perfil</th><th>Situação</th><th>Ações</th></tr></thead><tbody>`
+      +`${rows||`<tr><td colspan="4" class="empty-state">${lista.length?'Nenhum usuário encontrado para os filtros selecionados.':'Nenhuma conta carregada — verifique o aviso acima.'}</td></tr>`}</tbody></table>`;
+  }
+
+  // Marca o cartão do perfil escolhido (radio + classe .selected, para navegadores
+  // sem :has()) e explica o que cada perfil pode fazer.
+  function marcarPerfil(valor){
+    const alvo=normalizeRole(valor);
+    document.querySelectorAll('#user-form .perfil-card').forEach(card=>{
+      const radio=card.querySelector('input[type="radio"]');
+      const marcado=card.dataset.perfil===alvo;
+      if(radio)radio.checked=marcado;
+      card.classList.toggle('selected',marcado);
+    });
+    const aviso=document.getElementById('u-perfil-aviso');
+    if(aviso)aviso.textContent=perfilDe(alvo).descricao;
+    return alvo;
+  }
+
+  function setSenhaObrigatoria(obrigatoria){
+    const label=document.getElementById('u-senha-label');
+    const campo=document.getElementById('u-senha');
+    const conf=document.getElementById('u-senha2');
+    const toggle=document.getElementById('toggle-user-password');
+    if(label)label.textContent=obrigatoria?'Senha *':'Nova senha (opcional)';
+    if(campo){ campo.value=''; campo.required=!!obrigatoria; campo.placeholder=obrigatoria?`Mínimo de ${SENHA_MIN} caracteres`:'Deixe em branco para manter a senha atual'; }
+    if(conf){ conf.value=''; conf.placeholder=obrigatoria?'Repita a senha':'Repita a nova senha'; }
+    if(toggle){ campo.type='password'; toggle.textContent='Mostrar'; }
+  }
+
+  // O administrador não rebaixa nem desativa a si mesmo (a API também barra):
+  // os controles ficam desabilitados e o aviso explica o motivo.
+  function travarAutoEdicao(ehEu){
+    const radioOperador=document.querySelector('#user-form .perfil-card[data-perfil="operador"] input[type="radio"]');
+    if(radioOperador){
+      radioOperador.disabled=!!ehEu;
+      radioOperador.title=ehEu?'Você não pode rebaixar a sua própria conta.':'';
+    }
+    const optInativo=document.querySelector('#u-ativo option[value="0"]');
+    if(optInativo)optInativo.disabled=!!ehEu;
+    const selectAtivo=document.getElementById('u-ativo');
+    if(selectAtivo&&ehEu)selectAtivo.value='1';
+    return ehEu;
+  }
+
+  function openUserModal(perfilInicial){
+    if(!isAdmin()){ toast(USERS_BLOCKED_MSG,'aviso'); return; }
+    editingUser=null;
+    const title=document.getElementById('user-modal-title'); if(title)title.textContent='Novo Usuário';
+    const form=document.getElementById('user-form'); if(form)form.reset();
+    const nome=document.getElementById('u-nome'); if(nome)nome.value='';
+    const login=document.getElementById('u-usuario'); if(login)login.value='';
+    const ativo=document.getElementById('u-ativo'); if(ativo)ativo.value='1';
+    setSenhaObrigatoria(true);
+    travarAutoEdicao(false);
+    marcarPerfil(perfilInicial||'operador');
+    const box=document.getElementById('user-modal'); if(box)box.classList.add('active');
+    if(nome)setTimeout(()=>nome.focus(),60);
+  }
+
+  function editUser(id){
+    if(!isAdmin()){ toast(USERS_BLOCKED_MSG,'aviso'); return; }
+    const u=users.find(x=>Number(x.id)===Number(id));
+    if(!u){ toast('Usuário não encontrado. Atualize a lista e tente novamente.','aviso'); return; }
+    editingUser=Number(id);
+    const title=document.getElementById('user-modal-title'); if(title)title.textContent='Editar — @'+(u.usuario||u.id);
+    const form=document.getElementById('user-form'); if(form)form.reset();
+    const nome=document.getElementById('u-nome'); if(nome)nome.value=u.nome||'';
+    const login=document.getElementById('u-usuario'); if(login)login.value=u.usuario||'';
+    const ativo=document.getElementById('u-ativo'); if(ativo)ativo.value=Number(u.ativo)===0?'0':'1';
+    setSenhaObrigatoria(false); // senha em branco = mantém a atual
+    const ehEu=Number(u.id)===Number(currentUser?.id);
+    travarAutoEdicao(ehEu);
+    marcarPerfil(normalizeRole(u.role));
+    if(ehEu){
+      const aviso=document.getElementById('u-perfil-aviso');
+      if(aviso)aviso.textContent='Esta é a sua conta: você não pode rebaixá-la, desativá-la nem excluí-la (proteção contra perder o acesso ao menu Usuários).';
+    }
+    const box=document.getElementById('user-modal'); if(box)box.classList.add('active');
+  }
+
+  function validaFormUsuario(){
+    const nome=(document.getElementById('u-nome')?.value||'').trim();
+    const login=(document.getElementById('u-usuario')?.value||'').trim();
+    const senha=(document.getElementById('u-senha')?.value||'');
+    const senha2=(document.getElementById('u-senha2')?.value||'');
+    const ativo=document.getElementById('u-ativo')?.value==='0'?0:1;
+    const marcado=document.querySelector('#user-form input[name="u-perfil"]:checked');
+    const role=normalizeRole(marcado?marcado.value:'operador');
+    if(!nome) return {erro:'Informe o nome completo.'};
+    if(login.length<3) return {erro:'O usuário (login) precisa ter pelo menos 3 caracteres.'};
+    if(!/^[A-Za-z0-9._@-]{3,30}$/.test(login)) return {erro:'Usuário inválido: use de 3 a 30 caracteres, sem espaços (letras, números, ponto, hífen, @ ou _).'};
+    if(!editingUser&&senha.trim().length<SENHA_MIN) return {erro:`A senha precisa ter pelo menos ${SENHA_MIN} caracteres.`};
+    if(senha.trim()&&senha!==senha2) return {erro:'A confirmação de senha não confere.'};
+    if(users.some(u=>String(u.usuario||'').trim().toLowerCase()===login.toLowerCase()&&Number(u.id)!==Number(editingUser)))
+      return {erro:`Já existe uma conta com o usuário "${login}".`};
+    // Trava anti-bloqueio no cliente (a API confere de novo, com os dados reais):
+    // a última conta de Administrador ativa não pode ser rebaixada nem desativada.
+    if(editingUser!=null){
+      const alvo=users.find(x=>Number(x.id)===Number(editingUser));
+      const ehAdminAtivo=alvo&&normalizeRole(alvo.role)==='admin'&&Number(alvo.ativo)!==0;
+      const perdeAdmin=role!=='admin'||ativo===0;
+      const outrosAdmins=users.filter(u=>Number(u.id)!==Number(editingUser)&&normalizeRole(u.role)==='admin'&&Number(u.ativo)!==0);
+      if(ehAdminAtivo&&perdeAdmin&&!outrosAdmins.length)
+        return {erro:'Esta é a última conta de Administrador ativa: crie outro administrador antes de rebaixá-la ou desativá-la.'};
+      if(Number(alvo?.id)===Number(currentUser?.id)&&(perdeAdmin))
+        return {erro:'Você não pode rebaixar nem desativar a sua própria conta.'};
+    }
+    return {nome,usuario:login,role,ativo,senha:senha.trim()};
+  }
+
+  async function saveUser(){
+    if(!isAdmin()){ toast(USERS_BLOCKED_MSG,'aviso'); return; }
+    const dados=validaFormUsuario();
+    if(dados.erro){ toast(dados.erro,'aviso'); return; }
+    const payload={nome:dados.nome,usuario:dados.usuario,role:dados.role,ativo:dados.ativo};
+    if(dados.senha)payload.senha=dados.senha;
+    const btn=document.getElementById('u-salvar');
+    const btnOriginal=btn?btn.textContent:'';
+    if(btn){btn.disabled=true;btn.textContent='Salvando…';}
+    const eraEdicao=editingUser!=null;
+    try{
+      const salvo=await api(eraEdicao?'/users/'+editingUser:'/users',{
+        method:eraEdicao?'PATCH':'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(payload)
+      });
+      users=users.filter(u=>Number(u.id)!==Number(editingUser)&&Number(u.id)!==Number(salvo?.id));
+      users.push(salvo);
+      users=dedupeById(users);
+      saveUsersCache(); setUsersBlock(null);
+      // Editou a própria conta? O topo (nome/avatar/chip) acompanha na hora.
+      if(Number(salvo?.id)===Number(currentUser?.id)){
+        currentUser={...currentUser,nome:salvo.nome,usuario:salvo.usuario,role:normalizeRole(salvo.role)};
+        try{localStorage.setItem('frota_current_user',JSON.stringify(currentUser));}catch{}
+        applyPermissions();
+      }
+      editingUser=null;
+      closeModal('user-modal'); renderUsers();
+      toast(eraEdicao?'Usuário atualizado!':'Usuário criado com o perfil '+perfilDe(salvo&&salvo.role).label+'!');
+    }catch(e){
+      if(e&&(e.status===401||e.status===403)){
+        setUsersBlock(e.status===403?'Perfil sem acesso':'Sessão expirada',
+          (e.message||'')+' Entre novamente com uma conta de Administrador para gerenciar usuários.',
+          e.status===403?'erro':'');
+        toast(e.message||USERS_BLOCKED_MSG,'aviso');
+      }else if(isOfflineError(e)){
+        online=false; setConnStatus(false);
+        setUsersBlock('Sem conexão com o servidor','Não foi possível gravar a conta: a API está fora do ar. Usuários não ficam em fila offline — tente novamente quando a conexão voltar.');
+        toast('Sem conexão com o servidor: o usuário NÃO foi salvo.','aviso');
+      }else{
+        toast('Não foi possível salvar o usuário: '+e.message,'aviso');
+      }
+    }finally{
+      if(btn){btn.disabled=false;btn.textContent=btnOriginal||'Salvar usuário';}
+    }
+  }
+
+  async function deleteUser(id){
+    if(!isAdmin()){ toast(USERS_BLOCKED_MSG,'aviso'); return; }
+    const u=users.find(x=>Number(x.id)===Number(id));
+    if(!u){ toast('Usuário não encontrado.','aviso'); return; }
+    if(Number(u.id)===Number(currentUser?.id)){ toast('Você não pode excluir a sua própria conta.','aviso'); return; }
+    if(!confirm(`Excluir a conta de ${u.nome||''} (@${u.usuario||''})?\n\nEsta pessoa perde o acesso ao sistema imediatamente.`))return;
+    try{
+      await api('/users/'+id,{method:'DELETE'});
+      users=users.filter(x=>Number(x.id)!==Number(id));
+      saveUsersCache(); renderUsers();
+      toast('Usuário excluído.');
+    }catch(e){
+      if(e&&e.status===404&&e.doNosso){
+        users=users.filter(x=>Number(x.id)!==Number(id));
+        saveUsersCache(); renderUsers();
+        toast('Esta conta já não existe no servidor — removida da tela.','aviso');
+        return;
+      }
+      toast('Não foi possível excluir o usuário: '+e.message,'aviso');
+      if(e&&(e.status===401||e.status===403)) syncUsers(); // atualiza o aviso da página
+    }
+  }
+
+  // Botão do aviso: volta para a tela de login para renovar a sessão.
+  function renewSession(){
+    toast('Entre novamente com uma conta de Administrador.','aviso');
+    logout();
+  }
+
+  // v3.10.0 — liga/desliga tudo o que é exclusivo do Administrador: o item do
+  // menu lateral, o rótulo "Administração" e o chip do perfil no topo. Também é
+  // chamado no logout, para nada de área restrita ficar visível na tela de login.
+  function applyPermissions(){
+    const admin=isAdmin();
+    document.querySelectorAll('.admin-only').forEach(el=>{ el.hidden=!admin; });
+    const chip=document.getElementById('user-role');
+    if(chip){
+      const perfil=perfilDe(currentUser&&currentUser.role);
+      chip.textContent=perfil.label;
+      chip.className='user-role-chip '+(admin?'chip-admin':'chip-operador');
+      chip.title='Perfil de acesso desta conta: '+perfil.label;
+      chip.hidden=!currentUser;
+    }
+    const nomeEl=document.getElementById('user-name'); if(nomeEl)nomeEl.textContent=(currentUser&&currentUser.nome)||'Usuário';
+    const avatar=document.querySelector('.user-avatar'); if(avatar)avatar.textContent=iniciaisDe((currentUser&&(currentUser.nome||currentUser.usuario))||'U');
+    if(!admin){ users=[]; editingUser=null; setUsersBlock(null); renderUsers(); }
+  }
+
   function closeModal(id){const el=document.getElementById(id);if(el)el.classList.remove('active');}
 
-  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,openVehicleHistory,renderVehicleHistory,syncVehicleHistory,setHistoryFilter,setHistoryMonth,exportHistoryCsv,formatPlacaMercosul,closeModal,switchPage:page,checkConnection};
+  return {init,openVehicleModal,editVehicle,saveVehicle,deleteVehicle,openMaintenanceModal,editMaintenance,saveMaintenance,deleteMaintenance,openOilModal:()=>openMaintenanceModal('TROCA DE ÓLEO'),loadOilReport,openVehicleHistory,renderVehicleHistory,syncVehicleHistory,setHistoryFilter,setHistoryMonth,exportHistoryCsv,formatPlacaMercosul,closeModal,switchPage:page,checkConnection,
+    // v3.10.0 — usuários e perfis (área do Administrador)
+    openUserModal,editUser,saveUser,deleteUser,renderUsers,syncUsers,renewSession,applyPermissions,isAdmin,currentRole:()=>normalizeRole(currentUser&&currentUser.role)};
 })();
